@@ -1,30 +1,162 @@
 //
 //  File.swift
-//  
+//
 //
 //  Created by Peter Nicholls on 3/9/2024.
 //
 
 import Foundation
 import ComposableArchitecture
+import Combine
+import UIKit
+import SwiftUI
 
-fileprivate var instance: UserKit?
-
-public struct UserKit {
-    let store: Store<App.State, App.Action>
+public class UserKit {
     
-    public static func configure(apiKey: String) {
-        instance = UserKit(apiKey: apiKey, appId: Bundle.main.bundleIdentifier ?? "")
-        instance?.store.send(.start)
+    // MARK: - Properties
+    
+    private static var userKit: UserKit?
+        
+    public static var shared: UserKit {
+        guard let userKit = userKit else {
+            assertionFailure("UserKit has not been configured. Please call UserKit.configure()")
+            return UserKit()
+        }
+        
+        return userKit
     }
     
-    public static func login(name: String, email: String) {
-        instance?.store.send(.login(name, email))
+    private let store: Store<UserKitApp.State, UserKitApp.Action>?
+    
+    private var window: UIWindow?
+    
+    private var cancellables: Set<AnyCancellable> = []
+        
+    // MARK: - Functions
+    
+    public static func configure(apiKey: String) -> UserKit {
+        guard userKit == nil else {
+            return shared
+        }
+                        
+        userKit = .init(apiKey: apiKey)
+        
+        return shared
+    }
+        
+    init(apiKey: String? = nil) {
+        guard let apiKey = apiKey else {
+            self.store = nil
+            return
+        }
+                
+        self.store = Store.init(initialState: UserKitApp.State(config: .init(api: .init(key: apiKey)))) {
+            UserKitApp()._printChanges()
+        }
     }
     
-    init(apiKey: String, appId: String) {
-        self.store = Store.init(initialState: App.State(config: .init(apiKey: apiKey, appId: appId))) {
-            App()._printChanges()
+    public func login(id: String?, name: String?, email: String?) {
+        store?.send(.login(id, name, email))
+        
+        presentWindow() // TODO - Move out of this func
+        configureRootViewController()
+    }
+    
+    private func presentWindow() {
+        guard let windowScene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first else {
+            print("No UIWindowScene found")
+            return
+        }
+        
+        window = UIWindow(windowScene: windowScene)
+                        
+        let rootViewController = UIViewController()
+        rootViewController.view.backgroundColor = .clear
+        
+        window?.rootViewController = rootViewController
+
+        window?.windowLevel = .statusBar
+        window?.isHidden = false
+    }
+    
+    private func configureRootViewController() {
+        let viewController = UIViewController()
+        viewController.view.backgroundColor = .blue
+        
+        guard let store = store else {
+            return
+        }
+
+        let rootView = RootView(store: store)
+        let hostingViewController = CustomHostingController(rootView: rootView)
+        
+        hostingViewController.onDismiss = { [weak self] in
+            self?.window?.isHidden = true
+            store.send(.dismiss)
+        }
+
+        self.store?.publisher.user.map { $0 != nil }.removeDuplicates().sink(receiveValue: { [weak self] present in
+            guard let self = self else { return }
+                
+            if !present {
+                if hostingViewController.presentingViewController != nil {
+                    hostingViewController.dismiss(animated: true)
+                }
+                return
+            }
+
+            self.window?.makeKeyAndVisible()
+            self.window?.isHidden = false
+            
+            if self.window?.rootViewController?.presentedViewController == nil {
+                self.window?.rootViewController?.present(hostingViewController, animated: true)
+            }
+        }).store(in: &cancellables)
+    }
+}
+
+extension UserKit {
+    struct Config: Equatable {
+        let api: Api
+        
+        struct Api: Equatable {
+            let key: String
+        }
+    }
+}
+
+struct RootView: View {
+    @Bindable var store: StoreOf<UserKitApp>
+
+    var body: some View {
+        if let store = store.scope(state: \.user, action: \.user) {
+            UserView(store: store)
+        } else {
+            EmptyView()
+        }
+    }
+}
+
+class CustomHostingController<Content>: UIHostingController<Content> where Content: View {
+
+    var onDismiss: (() -> Void)?
+    
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        
+        if let presentationController = presentationController as? UISheetPresentationController {
+            presentationController.detents = [
+                .medium()
+            ]
+        }
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+
+        // You can also use this if you need to handle post-dismiss actions
+        if isBeingDismissed {
+            onDismiss?() // Call the callback if dismissed
         }
     }
 }

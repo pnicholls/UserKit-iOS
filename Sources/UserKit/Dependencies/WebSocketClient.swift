@@ -5,105 +5,152 @@
 //  Created by Peter Nicholls on 3/9/2024.
 //
 
-import Foundation
+import ComposableArchitecture
 import Dependencies
 import DependenciesMacros
-import SwiftPhoenixClient
+import Foundation
 
+@DependencyClient
 public struct WebSocketClient {
-    public var connect: @Sendable (_ url: String, _ accessToken: String) async -> AsyncThrowingStream<Event, Error> = { _, _ in .finished() }
-    public var join: @Sendable (_ topic: String) async -> AsyncThrowingStream<Event, Error> = { _ in .finished() }
-    public var push: @Sendable (_ topic: String, _ event: String, _ payload: [String: Any]) async -> AsyncThrowingStream<Event, Error> = { _, _, _ in .finished() }
-    
-    public enum Event {
-        case socket(Socket)
-        case channel(Channel)
-        
-        public enum Socket {
-            case connected
+    struct ID: Hashable, @unchecked Sendable {
+        let rawValue: AnyHashable
+
+        init<RawValue: Hashable & Sendable>(_ rawValue: RawValue) {
+            self.rawValue = rawValue
         }
-        
-        public enum Channel {
-            case joined
-            case push(Dictionary<String, Any>)
+
+        init() {
+            struct RawValue: Hashable, Sendable {}
+            self.rawValue = RawValue()
         }
     }
+
+    @CasePathable
+    public enum Action {
+        case didOpen(protocol: String?)
+        case didClose(code: URLSessionWebSocketTask.CloseCode, reason: Data?)
+    }
+
+    @CasePathable
+    public enum Message: Equatable {
+        struct Unknown: Error {}
+ 
+        case data(Data)
+        case string(String)
+
+        init(_ message: URLSessionWebSocketTask.Message) throws {
+            switch message {
+                case let .data(data): self = .data(data)
+                case let .string(string): self = .string(string)
+                @unknown default: throw Unknown()
+            }
+        }
+    }
+
+    var open: @Sendable (_ id: ID, _ url: URL, _ protocols: [String]) async -> AsyncStream<Action> = { _, _, _ in .finished }
+    var receive: @Sendable (_ id: ID) async throws -> AsyncStream<Result<Message, any Error>>
+    var send: @Sendable (_ id: ID, _ message: URLSessionWebSocketTask.Message) async throws -> Void
+    var sendPing: @Sendable (_ id: ID) async throws -> Void
 }
 
 extension WebSocketClient: DependencyKey {
-    
-    public static var liveValue: WebSocketClient {
-        let client = Client()
-        return WebSocketClient(connect: { url, accessToken in
-            await client.connect(url: url, accessToken: accessToken)
-        }, join: { topic in
-            await client.join(topic: topic)
-        }, push: { topic, event, payload in
-            await client.push(topic: topic, event: event, payload: payload)
-        })
+    public static var liveValue: Self {
+        return Self(
+            open: { await WebSocketActor.shared.open(id: $0, url: $1, protocols: $2) },
+            receive: { try await WebSocketActor.shared.receive(id: $0) },
+            send: { try await WebSocketActor.shared.send(id: $0, message: $1) },
+            sendPing: { try await WebSocketActor.shared.sendPing(id: $0) }
+        )
+
+    @globalActor final actor WebSocketActor {
+        private final class Delegate: NSObject, @unchecked Sendable, URLSessionWebSocketDelegate {
+            var continuation: AsyncStream<Action>.Continuation?
+
+            nonisolated func urlSession(_: URLSession, webSocketTask _: URLSessionWebSocketTask, didOpenWithProtocol protocol: String?) {
+                self.continuation?.yield(.didOpen(protocol: `protocol`))
+            }
+
+            nonisolated func urlSession(_: URLSession, webSocketTask _: URLSessionWebSocketTask, didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
+                self.continuation?.yield(.didClose(code: closeCode, reason: reason))
+                self.continuation?.finish()
+            }
+        }
+
+        typealias Dependencies = (socket: URLSessionWebSocketTask, delegate: Delegate)
+
+        static let shared = WebSocketActor()
+
+        var dependencies: [ID: Dependencies] = [:]
+
+        func open(id: ID, url: URL, protocols: [String]) -> AsyncStream<Action> {
+            let delegate = Delegate()
+            let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
+            let socket = session.webSocketTask(with: url, protocols: protocols)
+            defer { socket.resume() }
+            var continuation: AsyncStream<Action>.Continuation!
+            let stream = AsyncStream<Action> {
+              $0.onTermination = { _ in
+                socket.cancel()
+                Task { await self.removeDependencies(id: id) }
+              }
+              continuation = $0
+            }
+            delegate.continuation = continuation
+            self.dependencies[id] = (socket, delegate)
+            return stream
+        }
+
+        func close(id: ID, with closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) async throws {
+            defer { self.dependencies[id] = nil }
+            try self.socket(id: id).cancel(with: closeCode, reason: reason)
+        }
+
+        func receive(id: ID) throws -> AsyncStream<Result<Message, any Error>> {
+            let socket = try self.socket(id: id)
+            return AsyncStream { continuation in
+                let task = Task {
+                    while !Task.isCancelled {
+                        continuation.yield(await Result { try await Message(socket.receive()) })
+                    }
+                    continuation.finish()
+                }
+          
+                continuation.onTermination = { _ in task.cancel() }
+            }
+        }
+
+        func send(id: ID, message: URLSessionWebSocketTask.Message) async throws {
+            try await self.socket(id: id).send(message)
+        }
+
+        func sendPing(id: ID) async throws {
+            let socket = try self.socket(id: id)
+      
+            let data = try JSONSerialization.data(withJSONObject: ["type": "user-socket-ping"])
+            try await socket.send(.string(String(data: data, encoding: .utf8)!))
+        }
+
+        private func socket(id: ID) throws -> URLSessionWebSocketTask {
+            guard let dependencies = self.dependencies[id]?.socket else {
+                struct Closed: Error {}
+                throw Closed()
+            }
+      
+            return dependencies
+        }
+
+        private func removeDependencies(id: ID) {
+            self.dependencies[id] = nil
+        }
     }
-    
+    }
+
+    public static let testValue = Self()
 }
 
 extension DependencyValues {
-    
-    public var webSocketClient: WebSocketClient {
+    var webSocketClient: WebSocketClient {
         get { self[WebSocketClient.self] }
         set { self[WebSocketClient.self] = newValue }
     }
-    
-}
-
-private actor Client {
-    private var socket: Socket? = nil
-    private var channels: [String: Channel] = [:]
-    
-    func connect(url: String, accessToken: String) -> AsyncThrowingStream<WebSocketClient.Event, Error> {
-        AsyncThrowingStream { continuation in
-            self.socket = Socket(url, params: ["access_token": accessToken])
-            socket?.logger = { message in print("LOG:", message) }
-                        
-            socket?.onOpen {
-                continuation.yield(.socket(.connected))
-                continuation.finish()
-            }
-            
-            socket?.connect()
-        }
-    }
-    
-    func join(topic: String) -> AsyncThrowingStream<WebSocketClient.Event, Error> {
-        AsyncThrowingStream { continuation in
-            guard let socket = socket else {
-                struct JoinFailed: Error {}
-                return continuation.finish(throwing: JoinFailed())
-            }
-            
-            let channel = socket.channel(topic)
-            channels.updateValue(channel, forKey: topic)
-            
-            let push = channel.join()
-            push.receive("ok") { message in
-                continuation.yield(.channel(.joined))
-                continuation.finish()
-            }
-        }
-    }
-    
-    func push(topic: String, event: String, payload: Payload) -> AsyncThrowingStream<WebSocketClient.Event, Error> {
-        AsyncThrowingStream { continuation in
-            guard let channel = channels[topic] else {
-                struct NoChannelError: Error {}
-                return continuation.finish(throwing: NoChannelError())
-            }
-            
-            let push = channel.push(event, payload: payload)
-            push.receive("ok") { message in
-                print("message", message)
-                continuation.yield(.channel(.push(message.payload)))
-                continuation.finish()
-            }
-        }
-    }
-    
 }
