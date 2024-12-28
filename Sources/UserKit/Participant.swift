@@ -25,6 +25,7 @@ public struct Participant {
         public enum State: String, Decodable {
             case none
             case declined
+            case joined
         }
         
         public let id: String
@@ -32,17 +33,12 @@ public struct Participant {
         public let state: State
     }
     
-    public enum Action: BindableAction, Sendable {
-        case binding(BindingAction<State>)
+    public enum Action: Sendable {
     }
     
     public var body: some Reducer<State, Action> {
-        BindingReducer()
         Reduce { state, action in
-            switch action {
-            case .binding:
-                return .none
-            }
+            return .none
         }
     }
 }

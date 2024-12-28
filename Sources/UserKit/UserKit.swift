@@ -95,7 +95,7 @@ public class UserKit {
             store.send(.dismiss)
         }
 
-        self.store?.publisher.user.map { $0 != nil }.removeDuplicates().sink(receiveValue: { [weak self] present in
+        self.store?.publisher.isPresented.removeDuplicates().sink(receiveValue: { [weak self] present in
             guard let self = self else { return }
                 
             if !present {
@@ -141,8 +141,12 @@ class CustomHostingController<Content>: UIHostingController<Content> where Conte
 
     var onDismiss: (() -> Void)?
     
-    override func viewDidLoad() {
-        super.viewDidLoad()
+    var presentationDelegate = PresentationControllerDelegate()
+    
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+                
+        presentationController?.delegate = presentationDelegate
         
         if let presentationController = presentationController as? UISheetPresentationController {
             presentationController.detents = [
@@ -150,7 +154,7 @@ class CustomHostingController<Content>: UIHostingController<Content> where Conte
             ]
         }
     }
-
+    
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
 
@@ -158,5 +162,11 @@ class CustomHostingController<Content>: UIHostingController<Content> where Conte
         if isBeingDismissed {
             onDismiss?() // Call the callback if dismissed
         }
+    }
+}
+
+class PresentationControllerDelegate: NSObject, UIAdaptivePresentationControllerDelegate {
+    func presentationControllerShouldDismiss(_ presentationController: UIPresentationController) -> Bool {
+        return false
     }
 }

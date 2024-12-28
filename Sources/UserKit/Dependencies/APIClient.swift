@@ -8,7 +8,7 @@
 import ComposableArchitecture
 import Foundation
 
-let baseURL = "https://tournaments-promises-sorts-ada.trycloudflare.com/api/v1"
+let baseURL = "https://paint-vietnam-criteria-contained.trycloudflare.com/api/v1"
 
 public struct APIClient {
     var _request: (String, APIClient.Route) async throws -> Data

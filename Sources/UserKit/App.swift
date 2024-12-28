@@ -14,6 +14,7 @@ public struct UserKitApp {
     public struct State: Equatable {
         let config: UserKit.Config
         var user: User.State?
+        var isPresented: Bool = false // TODO: Model off call state
     }
     
     public enum Action {
@@ -32,13 +33,13 @@ public struct UserKitApp {
             switch action {
             case .api(.postUserResponse(.success(let response))):
                 state.user = .init(accessToken: response.accessToken, call: nil, webSocket: .init(url: response.webSocketUrl))
+                state.isPresented = true
                 return .send(.user(.`init`))
             
             case .api(.postUserResponse(.failure)):
                 return .none
                 
             case .dismiss:
-                state.user = nil
                 return .none
             
             case .login(let id, let name, let email):
@@ -53,9 +54,17 @@ public struct UserKitApp {
                         )
                     })))
                 }
-                          
+                
+            case .user(.call(.pictureInPicture(.restore))):
+                state.isPresented = true
+                return .none
+                                          
             case .user(.call(.decline)):
-                state.user = nil
+                state.isPresented = false
+                return .none
+                
+            case .user(.call(.join)):
+                state.isPresented = false
                 return .none
                 
             case .user:

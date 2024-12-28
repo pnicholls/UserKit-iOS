@@ -103,12 +103,9 @@ public struct User {
                     guard let call = userState.call else {
                         break
                     }
-                    
-                    var effects: [Effect<User.Action>] = []
-                                        
+                                                            
                     if state.call == nil {
-                        state.call = .init(participants: [])
-//                        effects.append(.send(.call(.`init`)))
+                        state.call = .init(callState: .requested(.init()), participants: [])
                     }
                     
                     state.call?.participants = .init(uniqueElements: call.participants.map {
@@ -119,13 +116,7 @@ public struct User {
                         )
                     })
                     
-                    let user = state.call?.participants.first(where: { $0.role == .user })
-                    if user?.state == .declined {
-                        state.call = nil
-                    }
-                    
-//                    effects.append(.send(.call(.reload)))
-                    return .concatenate(effects)
+                    return .none
                 default:
                     break
                 }
@@ -150,6 +141,7 @@ public extension User.State.WebSocket {
                     public enum State: String, Decodable {
                         case none
                         case declined
+                        case joined
                     }
                     
                     public enum Role: String, Decodable {
