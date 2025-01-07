@@ -11,7 +11,7 @@ public struct UserKitApp {
     @Dependency(\.webRTCClient) var webRTCClient
     
     @ObservableState
-    public struct State: Equatable {
+    public struct State {
         let config: UserKit.Config
         var user: User.State?
         var isPresented: Bool = false // TODO: Model off call state
@@ -34,8 +34,14 @@ public struct UserKitApp {
             case .api(.postUserResponse(.success(let response))):
                 state.user = .init(accessToken: response.accessToken, call: nil, webSocket: .init(url: response.webSocketUrl))
                 state.isPresented = true
-                return .send(.user(.`init`))
-            
+                
+                return .concatenate([
+                    .run { send in
+                        await apiClient.setAccessToken(response.accessToken)
+                    },
+                    .send(.user(.`init`))
+                ])
+                            
             case .api(.postUserResponse(.failure)):
                 return .none
                 
@@ -54,18 +60,18 @@ public struct UserKitApp {
                         )
                     })))
                 }
-                
-            case .user(.call(.pictureInPicture(.restore))):
-                state.isPresented = true
-                return .none
-                                          
-            case .user(.call(.decline)):
-                state.isPresented = false
-                return .none
-                
-            case .user(.call(.join)):
-                state.isPresented = false
-                return .none
+
+//            case .user(.call(.active(.pictureInPicture(.start)))):
+//                state.isPresented = false
+//                return .none
+//                
+//            case .user(.call(.active(.pictureInPicture(.stop)))):
+//                state.isPresented = true
+//                return .none
+//                
+//            case .user(.call(.active(.pictureInPicture(.restore)))):
+//                state.isPresented = true
+//                return .none
                 
             case .user:
                 return .none

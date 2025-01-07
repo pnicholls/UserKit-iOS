@@ -5,78 +5,74 @@ import SwiftUI
 
 @Reducer
 public struct Call {
+    @Dependency(\.audioSessionClient) var audioSessionClient
+    @Dependency(\.webRTCClient) var webRTCClient
     @Dependency(\.webSocketClient) var webSocketClient
         
+    @Reducer
+    public enum Destination {
+        case active(Active)
+        case requested(Requested)
+    }
+    
     @ObservableState
-    public struct State: Equatable {
-        var participants: IdentifiedArrayOf<Participant.State> = []
-        var isPictureInPictureActive: Bool = false
+    public struct State {
+        var destination: Destination.State = .requested(.init())
+        var participants: IdentifiedArrayOf<Participant.State>
     }
     
     public enum Action {
-        case `init`
-        case decline
-        case reload
-        case join
-        case pictureInPicture(PictureInPictureAction)
-        
-        public enum PictureInPictureAction {
-            case started
-            case stopped
-            case restore
-        }
+        case appeared
+        case participants(IdentifiedActionOf<Participant>)
+        case destination(Destination.Action)
     }
     
     public var body: some ReducerOf<Self> {
+        Scope(state: \.destination, action: \.destination) {
+            Scope(state: \.active, action: \.active) {
+                Active()
+            }
+            Scope(state: \.requested, action: \.requested) {
+                Requested()
+            }
+        }
         Reduce { state, action in
             switch action {
-            case .`init`:
+            case .appeared:
+                state.destination = .requested(.init())
                 return .none
                 
-            case .decline:
-                return .run { send in
-                    let dictionary: [String: Any] = [
-                        "type": "participantUpdate",
-                        "participant": [
-                            "state": "declined",
-                            "tracks": []
-                        ]
-                    ]
-                    let jsonData = try! JSONSerialization.data(withJSONObject: dictionary, options: [])
-                    let jsonString = String(data: jsonData, encoding: .utf8)
-                
-                    try await webSocketClient.send(id: WebSocketClient.ID(), message: .string(jsonString!))
+            case .destination(.requested(.accept)):
+                state.destination = .active(.init(participants: state.participants.filter { $0.role == .host }))
+                return .none
+
+            case .destination(.active(.continue)):
+                switch state.destination {
+                case .active(var active):
+                    active.isPictureInPictureActive = true
+                    state.destination = .active(active)
+                default:
+                    break // invalid state
                 }
-                
-            case .reload:
                 return .none
                 
-            case .join:
-                state.isPictureInPictureActive = true
+            case .destination(.active(.end)):
+                state.destination = .requested(.init())
                 return .run { send in
-                    let dictionary: [String: Any] = [
-                        "type": "participantUpdate",
-                        "participant": [
-                            "state": "joined",
-                            "tracks": []
-                        ]
-                    ]
-                    let jsonData = try! JSONSerialization.data(withJSONObject: dictionary, options: [])
-                    let jsonString = String(data: jsonData, encoding: .utf8)
-                
-                    try await webSocketClient.send(id: WebSocketClient.ID(), message: .string(jsonString!))
+                    await webRTCClient.close()
+                    await audioSessionClient.removeNotificationObservers()
                 }
-                
-            case .pictureInPicture(.started):
-                return .none
-            
-            case .pictureInPicture(.stopped):
+                                
+            case .destination:
                 return .none
                 
-            case .pictureInPicture(.restore):
+            case .participants:
                 return .none
             
             }
+        }
+        .forEach(\.participants, action: \.participants) {
+            Participant()
         }
     }
 }
@@ -86,102 +82,15 @@ struct CallView: View {
     @Bindable var store: StoreOf<Call>
     
     var body: some View {
-        if let store = store.scope(state: \.callState, action: \.user) {
-            UserView(store: store)
-        } else {
-            EmptyView()
-        }
-
-    }
-}
-
-struct VideoView: UIViewControllerRepresentable {
-    var store: StoreOf<Call>
-    
-    func makeUIViewController(context: Context) -> UIViewController {
-        let viewController = UIViewController()
-        viewController.view.backgroundColor = .systemGray
-        
-//        let placeholderView = PlaceholderView()
-//        placeholderView.frame = viewController.view.bounds
-//        context.coordinator.pictureInPictureVideoCallViewController.view.addSubview(placeholderView)
-        
-        let pictureInPictureControllerContentSource = AVPictureInPictureController.ContentSource(
-            activeVideoCallSourceView: viewController.view,
-            contentViewController: context.coordinator.pictureInPictureVideoCallViewController
-        )
-        
-        context.coordinator.pictureInPictureController = AVPictureInPictureController(contentSource: pictureInPictureControllerContentSource)
-        context.coordinator.pictureInPictureController?.delegate = context.coordinator
-        context.coordinator.pictureInPictureController?.canStartPictureInPictureAutomaticallyFromInline = true
-
-        return viewController
-    }
-    
-    func updateUIViewController(_ uiViewController: UIViewController, context: Context) {
-        store.publisher.isPictureInPictureActive.removeDuplicates().sink { isPictureInPictureActive in
-            guard let pictureInPictureController = context.coordinator.pictureInPictureController else { return }
-            
-            if isPictureInPictureActive, !pictureInPictureController.isPictureInPictureActive {
-                pictureInPictureController.startPictureInPicture()
+        ZStack {
+            switch store.scope(state: \.destination, action: \.destination).case {
+            case .active(let store):
+                ActiveView(store: store)
+                
+            case .requested(let store):
+                RequestedView(store: store)
             }
-        }.store(in: &context.coordinator.cancellables)
-    }
-    
-    func makeCoordinator() -> Coordinator {
-        Coordinator(store: store)
-    }
-    
-    class Coordinator: NSObject {
-        let store: StoreOf<Call>
-        var cancellables: Set<AnyCancellable> = []
-        
-        init(store: StoreOf<Call>) {
-            self.store = store
         }
-        
-        lazy var pictureInPictureVideoCallViewController: AVPictureInPictureVideoCallViewController = {
-            let pictureInPictureVideoCallViewController = AVPictureInPictureVideoCallViewController()
-            return pictureInPictureVideoCallViewController
-        }()
-        
-        var pictureInPictureController: AVPictureInPictureController? = nil
+        .onAppear { store.send(.appeared) }
     }
-}
-
-extension VideoView.Coordinator: AVPictureInPictureControllerDelegate {
-    func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
-        store.send(.pictureInPicture(.stopped))
-    }
-    
-    func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController) async -> Bool {
-        @MainActor func updateStore() {
-            store.send(.pictureInPicture(.restore))
-        }
-        
-        await updateStore()
-        return true
-    }
-}
-
-class PlaceholderView: UIView {
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        
-        backgroundColor = .red
-    }
-}
-
-#Preview("Light Mode") {
-    CallView(store: Store(initialState: Call.State()) {
-        Call()
-    })
-    .environment(\.colorScheme, .light)
-}
-
-#Preview("Dark Mode") {
-    CallView(store: Store(initialState: Call.State()) {
-        Call()
-    })
-    .environment(\.colorScheme, .dark)
 }

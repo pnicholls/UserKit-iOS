@@ -14,10 +14,9 @@ public struct User {
     @Dependency(\.apiClient) var apiClient
     @Dependency(\.continuousClock) var clock
     @Dependency(\.webSocketClient) var webSocketClient
-    @Dependency(\.webRTCClient) var webRTCClient
     
     @ObservableState
-    public struct State: Equatable {
+    public struct State {
         let accessToken: String
         var call: Call.State?
         let webSocket: WebSocket
@@ -50,7 +49,7 @@ public struct User {
             switch action {
             case .call:
                 return .none
-                
+                                
             case .webSocket(.connect):
                 switch state.webSocket.state {
                 case .connected, .connecting:
@@ -100,23 +99,36 @@ public struct User {
                 let message = try? JSONDecoder().decode(User.State.WebSocket.Message.self, from: raw.data(using: .utf8)!)
                 switch message {
                 case .userState(let userState):
-                    guard let call = userState.call else {
-                        break
-                    }
-                                                            
-                    if state.call == nil {
-                        state.call = .init(callState: .requested(.init()), participants: [])
-                    }
+                    var callState = state.call ?? .init(participants: [])
                     
-                    state.call?.participants = .init(uniqueElements: call.participants.map {
-                        .init(
-                            id: $0.id,
-                            role: .init(rawValue: $0.role.rawValue)!,
-                            state: .init(rawValue: $0.state.rawValue)!
-                        )
-                    })
+                    callState.participants = .init(uniqueElements: userState.call?.participants.map({ participantState in
+                        var participant = callState.participants[id: participantState.id] ??
+                            .init(
+                                id: participantState.id,
+                                role: .init(rawValue: participantState.role.rawValue)!,
+                                state: .init(rawValue: participantState.state.rawValue)!,
+                                sessionId: participantState.transceiverSessionId ?? "placeholder-to-do",
+                                tracks: []
+                            )
+                        participant.state = .init(rawValue: participantState.state.rawValue)!
+                        
+                        var tracks: [Participant.State.Track] = []
+                        if let id = participantState.tracks.audio, let audioEnabled = participantState.tracks.audioEnabled {
+                            let id = String(id.split(separator: "/")[1])
+                            tracks.append(.init(id: id, trackType: .audio, isEnabled: audioEnabled))
+                        }
+                        if let id = participantState.tracks.video, let videoEnabled = participantState.tracks.videoEnabled {
+                            let id = String(id.split(separator: "/")[1])
+                            tracks.append(.init(id: id, trackType: .video, isEnabled: videoEnabled))
+                        }
+                        participant.tracks = .init(uniqueElements: tracks)
+                        return participant
+                    }) ?? [])
+                    
+                    state.call = callState
                     
                     return .none
+                    
                 default:
                     break
                 }
@@ -149,9 +161,19 @@ public extension User.State.WebSocket {
                         case user
                     }
                     
+                    public struct Tracks: Decodable {
+                        let audioEnabled: Bool?
+                        let videoEnabled: Bool?
+                        let screenShareEnabled: Bool?
+                        let video: String?
+                        let audio: String?
+                    }
+
                     let id: String
                     let state: State
                     let role: Role
+                    let tracks: Tracks
+                    let transceiverSessionId: String?
                 }
                 let participants: [Participant]
             }

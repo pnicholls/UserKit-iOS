@@ -11,6 +11,7 @@ import DependenciesMacros
 import WebRTC
 
 public struct WebRTCClient {
+    public var close: @Sendable () async -> ()
     public var configure: @Sendable () async -> ()
     public var answer: @Sendable () async -> AsyncThrowingStream<SessionDescription, Error> = {  .finished() }
     public var offer: @Sendable () async -> AsyncThrowingStream<SessionDescription, Error> = {  .finished() }
@@ -73,7 +74,11 @@ extension WebRTCClient: DependencyKey {
     
     public static var liveValue: WebRTCClient {
         let client = Client()
-        return WebRTCClient(configure: {
+        return WebRTCClient(
+        close: {
+            await client.close()
+        },
+        configure: {
             await client.configure()
         }, answer: {
             await client.answer()
@@ -118,6 +123,15 @@ private actor Client: NSObject {
         return RTCPeerConnectionFactory(encoderFactory: videoEncoderFactory, decoderFactory: videoDecoderFactory)
     }()
     
+    func close() async {
+        guard let peerConnection = self.peerConnection else {
+            assertionFailure("Peer connection not initialized")
+            return
+        }
+        
+        peerConnection.close()
+    }
+    
     func configure() async {
         let config = RTCConfiguration()
         config.bundlePolicy = .maxBundle
@@ -141,9 +155,9 @@ private actor Client: NSObject {
         
         peerConnectionDelegate = PeerConnectionDelegate()
         self.peerConnection?.delegate = peerConnectionDelegate
-        
-        addAudioTrack()
-        addVideoTrack()
+                
+//        addAudioTrack()
+//        addVideoTrack()
     }
     
     func addAudioTrack() {
