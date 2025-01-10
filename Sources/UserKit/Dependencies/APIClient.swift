@@ -15,7 +15,7 @@
 import ComposableArchitecture
 import Foundation
 
-let baseURL = "https://stuck-greek-sending-evolution.trycloudflare.com"
+let baseURL = "https://php-buzz-paperback-husband.trycloudflare.com"
 
 actor APIClientState {
     private var accessToken: String?

@@ -99,6 +99,11 @@ public struct User {
                 let message = try? JSONDecoder().decode(User.State.WebSocket.Message.self, from: raw.data(using: .utf8)!)
                 switch message {
                 case .userState(let userState):
+                    // TEMP HACK
+                    if state.call != nil {
+                        return .none
+                    }
+                    
                     var callState = state.call ?? .init(participants: [])
                     
                     callState.participants = .init(uniqueElements: userState.call?.participants.map({ participantState in
@@ -112,6 +117,8 @@ public struct User {
                             )
                         participant.state = .init(rawValue: participantState.state.rawValue)!
                         
+                        
+                        // Tracks needs to update instead of being blown away
                         var tracks: [Participant.State.Track] = []
                         if let id = participantState.tracks.audio, let audioEnabled = participantState.tracks.audioEnabled {
                             let id = String(id.split(separator: "/")[1])

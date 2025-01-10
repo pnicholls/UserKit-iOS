@@ -15,6 +15,7 @@ public struct Active {
         var sessionId: String? = nil
         var isPictureInPictureActive: Bool = false
         var participants: IdentifiedArrayOf<Participant.State>
+        var video: Video.State? = nil
     }
     
     public enum Action {
@@ -40,7 +41,7 @@ public struct Active {
         case `continue`
         case end
         case participants(IdentifiedActionOf<Participant>)
-        case pictureInPicture(PictureInPictureAction)
+        case video(Video.Action)
         case webRTC(WebRTC)
     }
     
@@ -105,7 +106,12 @@ public struct Active {
                     }
                 }
                 
-            case .appeared:                
+            case .appeared:
+                // TODO: Model this better
+                if state.sessionId != nil {
+                    return .none
+                }
+                
                 return .concatenate(
                     .run { send in
                         await audioSessionClient.configure()
@@ -123,10 +129,19 @@ public struct Active {
                 
             case .continue:
                 state.isPictureInPictureActive = true
+                state.video?.isPictureInPictureActive = true
                 return .none
                 
             case .end:
                 state.isPictureInPictureActive = false
+                return .none
+                
+            case .participants(.element(id: let id, action: .setReceiver(let trackId, let receiver))):
+                guard let track = state.participants[id: id]?.tracks[id: trackId], track.trackType == .video else {
+                    return .none
+                }
+                
+                state.video = .init(receiver: receiver)
                 return .none
                 
             case .webRTC(.configure):
@@ -167,6 +182,9 @@ public struct Active {
                 return .none
             }
         }
+        .ifLet(\.video, action: \.video) {
+            Video()
+        }
         .forEach(\.participants, action: \.participants) {
             Participant()
         }
@@ -180,10 +198,8 @@ struct ActiveView: View {
     var body: some View {
         WithPerceptionTracking {
             VStack {
-                VideoView(store: store)
-                
-                ForEach(store.scope(state: \.participants, action: \.participants)) { store in
-                  ParticipantView(store: store)
+                if let store = store.scope(state: \.video, action: \.video) {
+                    VideoView(store: store)
                 }
 
                 Spacer()
@@ -216,84 +232,5 @@ struct ActiveView: View {
                 store.send(.appeared)
             }
         }
-    }
-}
-
-fileprivate struct VideoView: UIViewControllerRepresentable {
-    var store: StoreOf<Active>
-
-    func makeUIViewController(context: Context) -> UIViewController {
-        let viewController = UIViewController()
-        viewController.view.backgroundColor = .green
-
-        let pictureInPictureControllerContentSource = AVPictureInPictureController.ContentSource(
-            activeVideoCallSourceView: viewController.view,
-            contentViewController: context.coordinator.pictureInPictureVideoCallViewController
-        )
-
-        context.coordinator.pictureInPictureController = AVPictureInPictureController(contentSource: pictureInPictureControllerContentSource)
-        context.coordinator.pictureInPictureController?.delegate = context.coordinator
-        context.coordinator.pictureInPictureController?.canStartPictureInPictureAutomaticallyFromInline = false
-                
-        store.publisher.isPictureInPictureActive.removeDuplicates().sink { isPictureInPictureActive in
-            guard let pictureInPictureController = context.coordinator.pictureInPictureController else { return }
-            
-            if isPictureInPictureActive, !pictureInPictureController.isPictureInPictureActive {
-                pictureInPictureController.startPictureInPicture()
-            }
-            
-            if !isPictureInPictureActive && pictureInPictureController.isPictureInPictureActive {
-                pictureInPictureController.stopPictureInPicture()
-            }
-        }.store(in: &context.coordinator.cancellables)
-
-        return viewController
-    }
-
-    func updateUIViewController(_ uiViewController: UIViewController, context: Context) {
-        // NOP
-    }
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(store: store)
-    }
-
-    class Coordinator: NSObject {
-        let store: StoreOf<Active>
-        var cancellables: Set<AnyCancellable> = []
-
-        init(store: StoreOf<Active>) {
-            self.store = store
-        }
-
-        lazy var pictureInPictureVideoCallViewController: AVPictureInPictureVideoCallViewController = {
-            let pictureInPictureVideoCallViewController = AVPictureInPictureVideoCallViewController()
-            return pictureInPictureVideoCallViewController
-        }()
-
-        var pictureInPictureController: AVPictureInPictureController? = nil
-    }
-}
-
-extension VideoView.Coordinator: AVPictureInPictureControllerDelegate {
-    func pictureInPictureControllerWillStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
-        store.send(.pictureInPicture(.start))
-    }
-    
-    func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
-        store.send(.pictureInPicture(.stop))
-    }
-    
-    func pictureInPictureControllerWillStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
-        store.send(.pictureInPicture(.stop))
-    }
-
-    func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController) async -> Bool {
-        @MainActor func updateStore() {
-            store.send(.pictureInPicture(.restore))
-        }
-
-        await updateStore()
-        return true
     }
 }

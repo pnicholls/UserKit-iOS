@@ -12,7 +12,6 @@ import WebRTC
 @Reducer
 public struct Participant {
     
-    @Dependency(\.apiClient) var apiClient
     @Dependency(\.webRTCClient) var webRTCClient
 
     @ObservableState
@@ -60,36 +59,5 @@ public struct Participant {
                 return .none
             }
         }
-    }
-}
-
-struct ParticipantView: View {
-    @Bindable var store: StoreOf<Participant>
-    
-    let viewId = UUID()
-
-    var body: some View {
-        ZStack {
-             Color.black // Background color when no video
-             
-            if let videoTrack = store.tracks.first(where: { $0.trackType == .video })?.receiver?.track as? RTCVideoTrack {
-                 RTCVideoView(track: videoTrack)
-             }
-         }
-    }
-}
-
-struct RTCVideoView: UIViewRepresentable {
-    let track: RTCVideoTrack
-    
-    func makeUIView(context: Context) -> RTCMTLVideoView {
-        let videoView = RTCMTLVideoView(frame: .zero)
-        track.add(videoView)
-        
-        return videoView
-    }
-    
-    func updateUIView(_ uiView: RTCMTLVideoView, context: Context) {
-        // No updates needed as the track handling is done in makeUIView
     }
 }

@@ -43,7 +43,7 @@ private actor Client {
         do {
             try audioSession.setCategory(.playAndRecord, options: [
                 .defaultToSpeaker,
-                .allowBluetooth,
+                .allowBluetooth
             ])
             try audioSession.setActive(true)
             try audioSession.overrideOutputAudioPort(.speaker)

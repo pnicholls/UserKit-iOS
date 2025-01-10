@@ -60,19 +60,19 @@ public struct UserKitApp {
                         )
                     })))
                 }
-
-//            case .user(.call(.active(.pictureInPicture(.start)))):
-//                state.isPresented = false
-//                return .none
-//                
-//            case .user(.call(.active(.pictureInPicture(.stop)))):
-//                state.isPresented = true
-//                return .none
-//                
-//            case .user(.call(.active(.pictureInPicture(.restore)))):
-//                state.isPresented = true
-//                return .none
                 
+            case .user(.call(.destination(.active(.video(.pictureInPicture(.start)))))):
+                state.isPresented = false
+                return .none
+
+            case .user(.call(.destination(.active(.video(.pictureInPicture(.stop)))))):
+                state.isPresented = true
+                return .none
+                
+            case .user(.call(.destination(.active(.video(.pictureInPicture(.restore)))))):
+                state.isPresented = true
+                return .none
+                                
             case .user:
                 return .none
             }

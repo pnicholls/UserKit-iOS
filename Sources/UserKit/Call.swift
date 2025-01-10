@@ -39,7 +39,6 @@ public struct Call {
         Reduce { state, action in
             switch action {
             case .appeared:
-                state.destination = .requested(.init())
                 return .none
                 
             case .destination(.requested(.accept)):
