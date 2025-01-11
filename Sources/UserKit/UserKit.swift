@@ -31,6 +31,10 @@ public class UserKit {
     private var window: UIWindow?
     
     private var cancellables: Set<AnyCancellable> = []
+    
+    private var isConfigured: Bool {
+        window != nil
+    }
         
     // MARK: - Functions
     
@@ -40,6 +44,15 @@ public class UserKit {
         }
                         
         userKit = .init(apiKey: apiKey)
+            
+        NotificationCenter.default.addObserver(forName: UIScene.didActivateNotification, object: nil, queue: .main) { notification in
+            guard let userKit = userKit, !userKit.isConfigured else {
+                return
+            }
+            
+            userKit.presentWindow()
+            userKit.configureRootViewController()
+        }
         
         return shared
     }
@@ -57,9 +70,6 @@ public class UserKit {
     
     public func login(id: String?, name: String?, email: String?) {
         store?.send(.login(id, name, email))
-        
-        presentWindow() // TODO - Move out of this func
-        configureRootViewController()
     }
     
     private func presentWindow() {
@@ -76,13 +86,12 @@ public class UserKit {
         window?.rootViewController = rootViewController
 
         window?.windowLevel = .statusBar
-        window?.isHidden = false
+        window?.isHidden = true
+        
+        store?.send(.configured)
     }
     
     private func configureRootViewController() {
-        let viewController = UIViewController()
-        viewController.view.backgroundColor = .blue
-        
         guard let store = store else {
             return
         }

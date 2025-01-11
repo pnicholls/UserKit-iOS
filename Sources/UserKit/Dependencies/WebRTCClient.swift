@@ -113,7 +113,7 @@ private actor Client: NSObject {
     var peerConnectionDelegate: PeerConnectionDelegate?
     var videoSource: RTCVideoSource?
     var videoCapturer: RTCVideoCapturer?
-    private let mediaConstrains = [kRTCMediaConstraintsOfferToReceiveAudio: kRTCMediaConstraintsValueTrue,
+    private let mediaConstraints = [kRTCMediaConstraintsOfferToReceiveAudio: kRTCMediaConstraintsValueTrue,
                                    kRTCMediaConstraintsOfferToReceiveVideo: kRTCMediaConstraintsValueTrue]
     
     private static let factory: RTCPeerConnectionFactory = {
@@ -145,7 +145,7 @@ private actor Client: NSObject {
         
         // Define media constraints. DtlsSrtpKeyAgreement is required to be true to be able to connect with web browsers.
         let constraints = RTCMediaConstraints(mandatoryConstraints: nil,
-                                              optionalConstraints: ["DtlsSrtpKeyAgreement":kRTCMediaConstraintsValueTrue])
+                                              optionalConstraints: ["DtlsSrtpKeyAgreement": kRTCMediaConstraintsValueTrue])
         
         guard let peerConnection = Client.factory.peerConnection(with: config, constraints: constraints, delegate: nil) else {
             fatalError("Could not create new RTCPeerConnection")
@@ -181,9 +181,9 @@ private actor Client: NSObject {
                 return continuation.finish(throwing: NoPeerConnectionError())
             }
             
-            let constrains = RTCMediaConstraints(mandatoryConstraints: self.mediaConstrains,
+            let constraints = RTCMediaConstraints(mandatoryConstraints: self.mediaConstraints,
                                                  optionalConstraints: nil)
-            peerConnection.offer(for: constrains) { (sdp, error) in
+            peerConnection.offer(for: constraints) { (sdp, error) in
                 guard error == nil else {
                     return continuation.finish(throwing: error)
                 }
@@ -206,9 +206,9 @@ private actor Client: NSObject {
                 return continuation.finish(throwing: NoPeerConnectionError())
             }
             
-            let constrains = RTCMediaConstraints(mandatoryConstraints: self.mediaConstrains,
+            let constraints = RTCMediaConstraints(mandatoryConstraints: self.mediaConstraints,
                                                  optionalConstraints: nil)
-            peerConnection.answer(for: constrains) { (sdp, error) in
+            peerConnection.answer(for: constraints) { (sdp, error) in
                 guard error == nil else {
                     return continuation.finish(throwing: error)
                 }

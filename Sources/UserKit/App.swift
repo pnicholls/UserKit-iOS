@@ -3,6 +3,7 @@
 
 import ComposableArchitecture
 import SwiftUI
+import ReplayKit
 
 @Reducer
 public struct UserKitApp {
@@ -14,11 +15,12 @@ public struct UserKitApp {
     public struct State {
         let config: UserKit.Config
         var user: User.State?
-        var isPresented: Bool = false // TODO: Model off call state
+        var isPresented: Bool = false
     }
     
     public enum Action {
         case api(Api)
+        case configured
         case dismiss
         case login(String?, String?, String?)
         case user(User.Action)
@@ -33,7 +35,6 @@ public struct UserKitApp {
             switch action {
             case .api(.postUserResponse(.success(let response))):
                 state.user = .init(accessToken: response.accessToken, call: nil, webSocket: .init(url: response.webSocketUrl))
-                state.isPresented = true
                 
                 return .concatenate([
                     .run { send in
@@ -43,6 +44,9 @@ public struct UserKitApp {
                 ])
                             
             case .api(.postUserResponse(.failure)):
+                return .none
+                
+            case .configured:
                 return .none
                 
             case .dismiss:
@@ -79,6 +83,12 @@ public struct UserKitApp {
         }
         .ifLet(\.user, action: \.user) {
             User()
+        }
+        .onChange(of: { $0.user?.call?.uuid }) { oldValue, newValue in
+            Reduce { state, action in
+                state.isPresented = oldValue == nil && newValue != nil
+                return .none
+            }
         }
     }
 }

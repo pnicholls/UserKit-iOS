@@ -6,177 +6,30 @@ import WebRTC
 
 @Reducer
 public struct Active {
-    @Dependency(\.apiClient) var apiClient
-    @Dependency(\.audioSessionClient) var audioSessionClient
-    @Dependency(\.webRTCClient) var webRTCClient
-
     @ObservableState
     public struct State: Equatable {
-        var sessionId: String? = nil
-        var participants: IdentifiedArrayOf<Participant.State>
         var video: Video.State? = nil
     }
     
     public enum Action {
-        public enum ApiClientAction {
-            case postSessionResponse(Result<APIClient.PostSessionResponse, any Error>)
-            case pullTracksResponse(Result<APIClient.PullTracksResponse, any Error>)
-            case renegotiateResponse(Result<APIClient.RenegotiateResponse, any Error>)
-        }
-                
-        public enum WebRTC {
-            case configure
-            case pull
-        }
-
-        case apiClient(ApiClientAction)
-        case appeared
         case `continue`
         case end
-        case participants(IdentifiedActionOf<Participant>)
         case video(Video.Action)
-        case webRTC(WebRTC)
     }
     
     public var body: some ReducerOf<Self> {
         Reduce { state, action in
             switch action {
-            case .apiClient(.pullTracksResponse(.failure(_))):
-                return .none
-                
-            case .apiClient(.pullTracksResponse(.success(let response))):
-                guard let sessionId = state.sessionId else {
-                    return .none
-                }
-                
-                response.tracks.forEach { track in
-                    let participant = state.participants.elements.first { participant in
-                        participant.tracks.map { $0.id }.contains(track.trackName)
-                    }
-                    let participantTrack = participant?.tracks.first { $0.id == track.trackName }
-                    guard let participant = participant, let participantTrack else {
-                        return
-                    }
-                    state.participants[id: participant.id]?.tracks[id: participantTrack.id]?.mid = track.mid
-                }
-                
-                if response.requiresImmediateRenegotiation {
-                    return .run { send in
-                        for try await _ in await webRTCClient.setRemoteDescription(.init(sdp: response.sessionDescription.sdp, type: .offer)) {
-                            for try await sessionDescription in await webRTCClient.answer() {
-                                for try await sessionDescription in await webRTCClient.setLocalDescription(sessionDescription) {
-                                    await send(.apiClient(.renegotiateResponse(Result {
-                                        try await apiClient.request(endpoint: .renegotiate(sessionId, .init(sessionDescription: .init(sdp: sessionDescription.sdp, type: "answer"))), as: APIClient.RenegotiateResponse.self)
-                                    })))                                    
-                                }
-                            }
-                        }
-                    }
-                }
-                
-                return .none
-                
-            case .apiClient(.postSessionResponse(.failure(_))):
-                return .none
-            
-            case .apiClient(.postSessionResponse(.success(let response))):
-                state.sessionId = response.sessionId
-                return .send(.webRTC(.pull))
-            
-            case .apiClient(.renegotiateResponse(.failure(_))):
-                return .none
-                
-            case .apiClient(.renegotiateResponse(.success)):
-                return .run { [state] send in
-                    let transceivers = await webRTCClient.transceivers()
-                                    
-                    for participant in state.participants.filter({ $0.role == .host }).elements {
-                        for track in participant.tracks.elements {
-                            if let receiver = transceivers.filter({ $0.mediaType == .video }).first(where: { $0.mid == track.mid })?.receiver {
-                                await send(.participants(.element(id: participant.id, action: .setReceiver(track.id, receiver))))
-                            }
-                        }
-                    }
-                }
-                
-            case .appeared:
-                // TODO: Model this better
-                if state.sessionId != nil {
-                    return .none
-                }
-                
-                return .concatenate(
-                    .run { send in
-                        await audioSessionClient.configure()
-                        await audioSessionClient.addNotificationObservers() // TODO: Remove observers when required
-                    },
-                    .run { send in
-                        await webRTCClient.configure()
-                    },
-                    .run { send in
-                        await send(.apiClient(.postSessionResponse(Result {
-                            try await apiClient.request(endpoint: .postSession(.init()), as: APIClient.PostSessionResponse.self)
-                        })))
-                    }
-                )
-                
             case .continue:
                 return .none
                 
             case .end:
                 return .none
-                
-            case .participants(.element(id: let id, action: .setReceiver(let trackId, let receiver))):
-                guard let track = state.participants[id: id]?.tracks[id: trackId], track.trackType == .video else {
-                    return .none
-                }
-                
-//                state.video = .init(receiver: receiver)
-                return .none
-                
-            case .webRTC(.configure):
-                return .run { send in
-                    await webRTCClient.configure()
-                }
-                
-            case .webRTC(.pull):
-                guard let sessionId = state.sessionId else {
-                    assertionFailure("Session ID must be set")
-                    return .none
-                }
-                
-                let tracks: [APIClient.PullTracksRequest.Track] = state.participants.filter { $0.role == .host }.flatMap { participant -> [APIClient.PullTracksRequest.Track] in
-                    return participant.tracks.map {
-                        APIClient.PullTracksRequest.Track(
-                            location: "remote",
-                            trackName: $0.id,
-                            sessionId: participant.sessionId
-                        )
-                    }
-                }
-                
-                guard !tracks.isEmpty else {
-                    return .none
-                }
-                                                        
-                return .run { send in
-                    await send(.apiClient(.pullTracksResponse(Result {
-                        try await apiClient.request(
-                            endpoint: .pullTracks(sessionId, .init(tracks: tracks)),
-                            as: APIClient.PullTracksResponse.self
-                        )
-                    })))
-                }
-                
-            default:
-                return .none
+
             }
         }
         .ifLet(\.video, action: \.video) {
             Video()
-        }
-        .forEach(\.participants, action: \.participants) {
-            Participant()
         }
     }
 }
@@ -188,9 +41,9 @@ struct ActiveView: View {
     var body: some View {
         WithPerceptionTracking {
             VStack {
-//                if let store = store.scope(state: \.video, action: \.video) {
-//                    VideoView(store: store)
-//                }
+                if let store = store.scope(state: \.video, action: \.video) {
+                    VideoView(store: store)
+                }
                 
                 Spacer()
                                 
@@ -218,8 +71,6 @@ struct ActiveView: View {
                             )
                     }
                 }.padding(.horizontal, 16)
-            }.onAppear {
-                store.send(.appeared)
             }
         }
     }

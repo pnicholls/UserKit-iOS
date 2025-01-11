@@ -99,8 +99,8 @@ public struct User {
                 let message = try? JSONDecoder().decode(User.State.WebSocket.Message.self, from: raw.data(using: .utf8)!)
                 switch message {
                 case .userState(let userState):
-                    // TEMP HACK
-                    if state.call != nil {
+                    if userState.call == nil {
+                        state.call = nil
                         return .none
                     }
                     
