@@ -61,15 +61,15 @@ public struct UserKitApp {
                     })))
                 }
                 
-            case .user(.call(.destination(.active(.video(.pictureInPicture(.start)))))):
+            case .user(.call(.pictureInPicture(.start))):
                 state.isPresented = false
                 return .none
 
-            case .user(.call(.destination(.active(.video(.pictureInPicture(.stop)))))):
+            case .user(.call(.pictureInPicture(.stop))):
                 state.isPresented = true
                 return .none
                 
-            case .user(.call(.destination(.active(.video(.pictureInPicture(.restore)))))):
+            case .user(.call(.pictureInPicture(.restore))):
                 state.isPresented = true
                 return .none
                                 

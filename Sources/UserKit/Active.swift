@@ -13,7 +13,6 @@ public struct Active {
     @ObservableState
     public struct State: Equatable {
         var sessionId: String? = nil
-        var isPictureInPictureActive: Bool = false
         var participants: IdentifiedArrayOf<Participant.State>
         var video: Video.State? = nil
     }
@@ -24,13 +23,7 @@ public struct Active {
             case pullTracksResponse(Result<APIClient.PullTracksResponse, any Error>)
             case renegotiateResponse(Result<APIClient.RenegotiateResponse, any Error>)
         }
-        
-        public enum PictureInPictureAction {
-            case start
-            case stop
-            case restore
-        }
-        
+                
         public enum WebRTC {
             case configure
             case pull
@@ -99,7 +92,7 @@ public struct Active {
                                     
                     for participant in state.participants.filter({ $0.role == .host }).elements {
                         for track in participant.tracks.elements {
-                            if let receiver = transceivers.first(where: { $0.mid == track.mid })?.receiver {
+                            if let receiver = transceivers.filter({ $0.mediaType == .video }).first(where: { $0.mid == track.mid })?.receiver {
                                 await send(.participants(.element(id: participant.id, action: .setReceiver(track.id, receiver))))
                             }
                         }
@@ -128,12 +121,9 @@ public struct Active {
                 )
                 
             case .continue:
-                state.isPictureInPictureActive = true
-                state.video?.isPictureInPictureActive = true
                 return .none
                 
             case .end:
-                state.isPictureInPictureActive = false
                 return .none
                 
             case .participants(.element(id: let id, action: .setReceiver(let trackId, let receiver))):
@@ -141,7 +131,7 @@ public struct Active {
                     return .none
                 }
                 
-                state.video = .init(receiver: receiver)
+//                state.video = .init(receiver: receiver)
                 return .none
                 
             case .webRTC(.configure):
@@ -198,10 +188,10 @@ struct ActiveView: View {
     var body: some View {
         WithPerceptionTracking {
             VStack {
-                if let store = store.scope(state: \.video, action: \.video) {
-                    VideoView(store: store)
-                }
-
+//                if let store = store.scope(state: \.video, action: \.video) {
+//                    VideoView(store: store)
+//                }
+                
                 Spacer()
                                 
                 VStack(spacing: 12) {

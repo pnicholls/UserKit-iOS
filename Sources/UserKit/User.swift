@@ -226,7 +226,7 @@ struct UserView: View {
 
     var body: some View {
         if let store = store.scope(state: \.call, action: \.call) {
-            CallView(store: store)
+            CallViewControllerRepresentable(store: store)
         } else {
             EmptyView()
         }
