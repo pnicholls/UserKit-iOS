@@ -65,17 +65,21 @@ public struct UserKitApp {
                     })))
                 }
                 
-            case .user(.call(.pictureInPicture(.start))):
+            case .user(.call(.destination(.requested(.accept)))):
                 state.isPresented = false
                 return .none
 
-            case .user(.call(.pictureInPicture(.stop))):
-                state.isPresented = true
-                return .none
-                
-            case .user(.call(.pictureInPicture(.restore))):
-                state.isPresented = true
-                return .none
+//            case .user(.call(.pictureInPicture(.start))):
+//                state.isPresented = false
+//                return .none
+//
+//            case .user(.call(.pictureInPicture(.stop))):
+//                state.isPresented = true
+//                return .none
+//                
+//            case .user(.call(.pictureInPicture(.restore))):
+//                state.isPresented = true
+//                return .none
                                 
             case .user:
                 return .none
