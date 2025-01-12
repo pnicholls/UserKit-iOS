@@ -4,8 +4,6 @@ import ComposableArchitecture
 import SwiftUI
 import WebRTC
 
-import ReplayKit
-
 @Reducer
 public struct Call {
     @Dependency(\.apiClient) var apiClient
@@ -34,6 +32,7 @@ public struct Call {
         public enum ApiClientAction {
             case postSessionResponse(Result<APIClient.PostSessionResponse, any Error>)
             case pullTracksResponse(Result<APIClient.PullTracksResponse, any Error>)
+            case pushTracksResponse(Result<APIClient.PushTracksResponse, any Error>)
             case renegotiateResponse(Result<APIClient.RenegotiateResponse, any Error>)
         }
 
@@ -44,6 +43,7 @@ public struct Call {
         }
         
         public enum WebRTC {
+            case push
             case pull
         }
         
@@ -101,12 +101,58 @@ public struct Call {
                 
                 return .none
                 
+            case .apiClient(.pushTracksResponse(.failure(_))):
+                return .none
+                
+            case .apiClient(.pushTracksResponse(.success(let response))):
+                return .run { [state] send in
+                    await webRTCClient.setRemoteDescription(.init(sdp: response.sessionDescription.sdp, type: .answer))
+                                        
+                    let tracks: [String: Any] = [
+                        "audioEnabled": false,
+                        "videoEnabled": false,
+                        "screenShareEnabled": true,
+                        "video": "",
+                        "audio": "",
+                        "screenshare": "\(state.sessionId!)/videoSourceTrackId"
+                    ]
+
+                    let participant: [String: Any] = [
+                        "state": "none",
+                        "transceiverSessionId": state.sessionId!,
+                        "tracks": tracks
+                    ]
+
+                    let participantUpdate: [String: Any] = [
+                        "type": "participantUpdate",
+                        "participant": participant
+                    ]
+
+                    do {
+                        let jsonData = try JSONSerialization.data(withJSONObject: participantUpdate, options: .prettyPrinted)
+                        if let jsonString = String(data: jsonData, encoding: .utf8) {
+                            try await webSocketClient.send(id: WebSocketClient.ID(), message: .string(jsonString))
+                        }
+                    } catch {
+                        print("Error converting to JSON: \(error)")
+                    }
+                    
+                    for try await buffer in await screenRecorderClient.start() {
+                        await webRTCClient.handleSourceBuffer(buffer.sampleBuffer)
+                    }
+                }
+                
             case .apiClient(.postSessionResponse(.failure(_))):
                 return .none
             
             case .apiClient(.postSessionResponse(.success(let response))):
                 state.sessionId = response.sessionId
-                return .send(.webRTC(.pull))
+                return .send(.webRTC(.push))
+                
+//                return .concatenate(
+//                    .send(.webRTC(.push)),
+//                    .send(.webRTC(.pull))
+//                )
             
             case .apiClient(.renegotiateResponse(.failure(_))):
                 return .none
@@ -210,6 +256,39 @@ public struct Call {
                         )
                     })))
                 }
+            
+            case .webRTC(.push):
+                guard let sessionId = state.sessionId else {
+                    assertionFailure("Session ID must be set")
+                    return .none
+                }
+                                                                        
+                return .run { [state] send in
+                    for try await offer in await webRTCClient.offer() {
+                        for try await sessionDescription in await webRTCClient.setLocalDescription(offer) {
+                            let transceivers = await webRTCClient.transceivers().filter { $0.sender.track != nil }
+                            
+                            let tracks = transceivers.map { transceiver in
+                                APIClient.PushTracksRequest.Track(
+                                    location: "local",
+                                    trackName: transceiver.sender.track!.trackId,
+                                    mid: transceiver.mid
+                                )
+                            }
+                            
+                            guard !tracks.isEmpty else {
+                                return
+                            }
+
+                            await send(.apiClient(.pushTracksResponse(Result {
+                                try await apiClient.request(
+                                    endpoint: .pushTracks(sessionId, .init(sessionDescription: .init(sdp: sessionDescription.sdp, type: "offer"), tracks: tracks)),
+                                    as: APIClient.PushTracksResponse.self
+                                )
+                            })))
+                        }
+                    }
+                }
             }
         }
         .forEach(\.participants, action: \.participants) {
@@ -262,9 +341,11 @@ final class CallViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         
-        pictureInPictureController = AVPictureInPictureController(contentSource: pictureInPictureControllerContentSource)
-        pictureInPictureController?.canStartPictureInPictureAutomaticallyFromInline = false
-        pictureInPictureController?.delegate = self
+        // PiP can't work whilst the screen recorder is running
+        
+//        pictureInPictureController = AVPictureInPictureController(contentSource: pictureInPictureControllerContentSource)
+//        pictureInPictureController?.canStartPictureInPictureAutomaticallyFromInline = false
+//        pictureInPictureController?.delegate = self
         
         view.addSubview(hostingViewController.view)
                 

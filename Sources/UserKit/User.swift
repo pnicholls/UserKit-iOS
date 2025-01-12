@@ -8,6 +8,8 @@
 import ComposableArchitecture
 import SwiftUI
 
+import ReplayKit
+
 @Reducer
 public struct User {
     
@@ -106,7 +108,7 @@ public struct User {
                     
                     var callState = state.call ?? .init(participants: [])
                     
-                    callState.participants = .init(uniqueElements: userState.call?.participants.map({ participantState in
+                    callState.participants = .init(uniqueElements: userState.call?.participants.filter { $0.role == .host }.map({ participantState in
                         var participant = callState.participants[id: participantState.id] ??
                             .init(
                                 id: participantState.id,

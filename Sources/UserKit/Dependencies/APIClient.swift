@@ -15,7 +15,7 @@
 import ComposableArchitecture
 import Foundation
 
-let baseURL = "https://halo-arnold-brakes-catering.trycloudflare.com"
+let baseURL = "https://buy-corresponding-dropped-really.trycloudflare.com"
 
 actor APIClientState {
     private var accessToken: String?
@@ -70,6 +70,7 @@ extension APIClient {
         case postUser(UserRequest)
         case postSession(PostSessionRequest)
         case pullTracks(String, PullTracksRequest)
+        case pushTracks(String, PushTracksRequest)
         case renegotiate(String, RenegotiateRequest)
                 
         var url: String {
@@ -81,6 +82,9 @@ extension APIClient {
                 "\(baseURL)/api/v1/users"
                 
             case .pullTracks(let sessionId, _):
+                "\(baseURL)/api/calls/sessions/\(sessionId)/tracks/new"
+
+            case .pushTracks(let sessionId, _):
                 "\(baseURL)/api/calls/sessions/\(sessionId)/tracks/new"
                 
             case .renegotiate(let sessionId, _):
@@ -100,6 +104,9 @@ extension APIClient {
             case .pullTracks:
                 return .post
                 
+            case .pushTracks:
+                return .post
+                
             case .renegotiate:
                 return .put
                 
@@ -117,6 +124,9 @@ extension APIClient {
             case .pullTracks(_, let request):
                 return request
                 
+            case .pushTracks(_, let request):
+                return request
+                
             case .renegotiate(_, let request):
                 return request
                 
@@ -129,6 +139,9 @@ extension APIClient {
                 return JSONEncoder()
                 
             case .pullTracks:
+                return JSONEncoder()
+                
+            case .pushTracks:
                 return JSONEncoder()
                 
             case .renegotiate:
@@ -183,6 +196,28 @@ extension APIClient {
     }
     
     public struct PullTracksResponse: Codable {
+        let requiresImmediateRenegotiation: Bool
+        let tracks: [Track]
+        let sessionDescription: SessionDescription
+        
+        struct Track: Codable {
+            let mid: String
+            let trackName: String
+        }
+    }
+    
+    struct PushTracksRequest: Codable, Equatable {
+        let sessionDescription: SessionDescription
+        let tracks: [Track]
+        
+        struct Track: Codable, Equatable {
+            let location: String
+            let trackName: String
+            let mid: String
+        }
+    }
+    
+    public struct PushTracksResponse: Codable {
         let requiresImmediateRenegotiation: Bool
         let tracks: [Track]
         let sessionDescription: SessionDescription

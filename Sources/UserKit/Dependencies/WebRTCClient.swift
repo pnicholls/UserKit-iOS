@@ -112,6 +112,7 @@ private actor Client: NSObject {
     var peerConnection: RTCPeerConnection?
     var peerConnectionDelegate: PeerConnectionDelegate?
     var videoSource: RTCVideoSource?
+    var screenShareSource: RTCVideoSource?
     var videoCapturer: RTCVideoCapturer?
     private let mediaConstraints = [kRTCMediaConstraintsOfferToReceiveAudio: kRTCMediaConstraintsValueTrue,
                                    kRTCMediaConstraintsOfferToReceiveVideo: kRTCMediaConstraintsValueTrue]
@@ -156,24 +157,46 @@ private actor Client: NSObject {
         peerConnectionDelegate = PeerConnectionDelegate()
         self.peerConnection?.delegate = peerConnectionDelegate
                 
-//        addAudioTrack()
-//        addVideoTrack()
+        addAudioTrack()
+        addVideoTrack()
     }
     
     func addAudioTrack() {
         let audioConstrains = RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil)
         let audioSource = Client.factory.audioSource(with: audioConstrains)
+        
         let audioTrack = Client.factory.audioTrack(with: audioSource, trackId: "audio0")
-        self.peerConnection?.addTransceiver(with: audioTrack)
+        
+        let transceiverInit = RTCRtpTransceiverInit()
+        transceiverInit.direction = .sendOnly
+        
+        self.peerConnection?.addTransceiver(with: audioTrack, init: transceiverInit)
     }
     
     func addVideoTrack() {
         self.videoSource = Client.factory.videoSource()
         let videoTrack = Client.factory.videoTrack(with: videoSource!, trackId: "videoSourceTrackId")
         self.videoCapturer = RTCVideoCapturer(delegate: videoSource!)
-        let transceiver = self.peerConnection?.addTransceiver(with: videoTrack)
+        
+        let transceiverInit = RTCRtpTransceiverInit()
+        transceiverInit.direction = .sendOnly
+        
+        guard let transceiver = self.peerConnection?.addTransceiver(with: videoTrack, init: transceiverInit) else {
+            return
+        }
+        
+        let parameters = transceiver.sender.parameters
+        
+        if let encoding = parameters.encodings.first {
+            encoding.maxBitrateBps = NSNumber(value: 8_000_000)
+            encoding.minBitrateBps = NSNumber(value: 3_000_000)
+            encoding.maxFramerate = NSNumber(value: 60)
+            encoding.scaleResolutionDownBy = NSNumber(value: 1.0)
+            parameters.encodings = [encoding]
+            transceiver.sender.parameters = parameters
+        }
     }
-    
+        
     func offer() -> AsyncThrowingStream<WebRTCClient.SessionDescription, Error> {
         AsyncThrowingStream { continuation in
             guard let peerConnection = peerConnection else {
@@ -254,10 +277,7 @@ private actor Client: NSObject {
         guard let peerConnection = peerConnection else {
             fatalError()
         }
-            
-//        let videoTrack = peerConnection.transceivers.first { $0.mediaType == .video }?.receiver.track as? RTCVideoTrack
-//        print(videoTrack)
-        
+                    
         return peerConnection.transceivers
     }
     
@@ -282,25 +302,24 @@ private actor Client: NSObject {
     func handleSourceBuffer(sampleBuffer: CMSampleBuffer) async {
         if (CMSampleBufferGetNumSamples(sampleBuffer) != 1 || !CMSampleBufferIsValid(sampleBuffer) ||
             !CMSampleBufferDataIsReady(sampleBuffer)) {
-            return;
+            return
         }
         
-        let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer);
-        if (pixelBuffer == nil) {
-            return;
+        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
+            return
         }
         
-        let width = CVPixelBufferGetWidth(pixelBuffer!);
-        let height = CVPixelBufferGetHeight(pixelBuffer!);
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
         
-        print(width, height)
+        // Use the actual dimensions from the buffer
+        videoSource!.adaptOutputFormat(toWidth: Int32(width), height: Int32(height), fps: 60)
         
-        videoSource!.adaptOutputFormat(toWidth: Int32(width), height: Int32(height), fps: 30)
-        
-        let rtcPixelBuffer = RTCCVPixelBuffer(pixelBuffer: pixelBuffer!)
-        let timeStampNs =
-            CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sampleBuffer)) * Float64(NSEC_PER_SEC)
-        let videoFrame =  RTCVideoFrame(buffer: rtcPixelBuffer, rotation: RTCVideoRotation._0, timeStampNs: Int64(timeStampNs))
+        let rtcPixelBuffer = RTCCVPixelBuffer(pixelBuffer: pixelBuffer)
+        let timeStampNs = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sampleBuffer)) * Float64(NSEC_PER_SEC)
+        let videoFrame = RTCVideoFrame(buffer: rtcPixelBuffer,
+                                     rotation: RTCVideoRotation._0,  // Keep original orientation
+                                     timeStampNs: Int64(timeStampNs))
         
         videoSource!.capturer(videoCapturer!, didCapture: videoFrame)
     }
