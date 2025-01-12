@@ -8,6 +8,7 @@ import WebRTC
 public struct Call {
     @Dependency(\.apiClient) var apiClient
     @Dependency(\.audioSessionClient) var audioSessionClient
+    @Dependency(\.cameraClient) var cameraClient
     @Dependency(\.screenRecorderClient) var screenRecorderClient
     @Dependency(\.webRTCClient) var webRTCClient
     @Dependency(\.webSocketClient) var webSocketClient
@@ -106,39 +107,47 @@ public struct Call {
                 
             case .apiClient(.pushTracksResponse(.success(let response))):
                 return .run { [state] send in
-                    await webRTCClient.setRemoteDescription(.init(sdp: response.sessionDescription.sdp, type: .answer))
-                                        
-                    let tracks: [String: Any] = [
-                        "audioEnabled": false,
-                        "videoEnabled": false,
-                        "screenShareEnabled": true,
-                        "video": "",
-                        "audio": "",
-                        "screenshare": "\(state.sessionId!)/videoSourceTrackId"
-                    ]
+                    try await withThrowingTaskGroup(of: Void.self) { group in
+                        // First do the setup work
+                        await webRTCClient.setRemoteDescription(.init(sdp: response.sessionDescription.sdp, type: .answer))
+                                                    
+                        let tracks: [String: Any] = [
+                            "audioEnabled": true,
+                            "videoEnabled": true,
+                            "screenShareEnabled": true,
+                            "video": "\(state.sessionId!)/videoSourceTrackId",
+                            "audio": "\(state.sessionId!)/audio0",
+                            "screenshare": "\(state.sessionId!)/screenShareSourceTrackId"
+                        ]
 
-                    let participant: [String: Any] = [
-                        "state": "none",
-                        "transceiverSessionId": state.sessionId!,
-                        "tracks": tracks
-                    ]
+                        let participant: [String: Any] = [
+                            "state": "none",
+                            "transceiverSessionId": state.sessionId!,
+                            "tracks": tracks
+                        ]
 
-                    let participantUpdate: [String: Any] = [
-                        "type": "participantUpdate",
-                        "participant": participant
-                    ]
+                        let participantUpdate: [String: Any] = [
+                            "type": "participantUpdate",
+                            "participant": participant
+                        ]
 
-                    do {
                         let jsonData = try JSONSerialization.data(withJSONObject: participantUpdate, options: .prettyPrinted)
                         if let jsonString = String(data: jsonData, encoding: .utf8) {
                             try await webSocketClient.send(id: WebSocketClient.ID(), message: .string(jsonString))
                         }
-                    } catch {
-                        print("Error converting to JSON: \(error)")
-                    }
-                    
-                    for try await buffer in await screenRecorderClient.start() {
-                        await webRTCClient.handleSourceBuffer(buffer.sampleBuffer)
+                        
+                        // Then add the concurrent tasks
+                        group.addTask {
+                            for try await buffer in await cameraClient.start() {
+                                await webRTCClient.handleVideoSourceBuffer(buffer.sampleBuffer)
+                            }
+                        }
+                        
+                        group.addTask {
+                            for try await buffer in await screenRecorderClient.start() {
+                                await webRTCClient.handleScreenShareSourceBuffer(buffer.sampleBuffer)
+                            }
+                        }
                     }
                 }
                 

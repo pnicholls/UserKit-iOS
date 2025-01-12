@@ -49,7 +49,6 @@ private actor Client {
             recorder.isMicrophoneEnabled = false
             recorder.isCameraEnabled = false
             
-            
             recorder.startCapture { sampleBuffer, bufferType, error in
                 guard error == nil else {
                     continuation.finish(throwing: error)
