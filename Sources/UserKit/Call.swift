@@ -3,6 +3,7 @@ import Combine
 import ComposableArchitecture
 import SwiftUI
 import WebRTC
+import ReplayKit
 
 @Reducer
 public struct Call {
@@ -105,12 +106,12 @@ public struct Call {
             case .apiClient(.pushTracksResponse(.failure(_))):
                 return .none
                 
-            case .apiClient(.pushTracksResponse(.success(let response))):
+            case .apiClient(.pushTracksResponse(.success(let response))):                
                 return .run { [state] send in
                     try await withThrowingTaskGroup(of: Void.self) { group in
                         // First do the setup work
                         await webRTCClient.setRemoteDescription(.init(sdp: response.sessionDescription.sdp, type: .answer))
-                                                    
+                                                                         
                         let tracks: [String: Any] = [
                             "audioEnabled": true,
                             "videoEnabled": true,
@@ -136,7 +137,6 @@ public struct Call {
                             try await webSocketClient.send(id: WebSocketClient.ID(), message: .string(jsonString))
                         }
                         
-                        // Then add the concurrent tasks
                         group.addTask {
                             for try await buffer in await cameraClient.start() {
                                 await webRTCClient.handleVideoSourceBuffer(buffer.sampleBuffer)
@@ -156,28 +156,26 @@ public struct Call {
             
             case .apiClient(.postSessionResponse(.success(let response))):
                 state.sessionId = response.sessionId
-                return .send(.webRTC(.push))
-                
-//                return .concatenate(
-//                    .send(.webRTC(.push)),
-//                    .send(.webRTC(.pull))
-//                )
+                return .send(.webRTC(.pull))
             
             case .apiClient(.renegotiateResponse(.failure(_))):
                 return .none
                 
             case .apiClient(.renegotiateResponse(.success)):
-                return .run { [state] send in
-                    let transceivers = await webRTCClient.transceivers()
-                                    
-                    for participant in state.participants.filter({ $0.role == .host }).elements {
-                        for track in participant.tracks.elements {
-                            if let receiver = transceivers.filter({ $0.mediaType == .video }).first(where: { $0.mid == track.mid })?.receiver {
-                                await send(.participants(.element(id: participant.id, action: .setReceiver(track.id, receiver))))
+                return .merge(
+                    .run { [state] send in
+                        let transceivers = await webRTCClient.transceivers()
+                                        
+                        for participant in state.participants.filter({ $0.role == .host }).elements {
+                            for track in participant.tracks.elements {
+                                if let receiver = transceivers.filter({ $0.mediaType == .video }).first(where: { $0.mid == track.mid })?.receiver {
+                                    await send(.participants(.element(id: participant.id, action: .setReceiver(track.id, receiver))))
+                                }
                             }
                         }
-                    }
-                }
+                    },
+                    .send(.webRTC(.push))
+                )
                                                 
             case .appeared:
                 return .concatenate(
@@ -236,7 +234,7 @@ public struct Call {
 
             case .pictureInPicture(.restore):
                 return .none
-            
+                        
             case .webRTC(.pull):
                 guard let sessionId = state.sessionId else {
                     assertionFailure("Session ID must be set")
@@ -272,7 +270,7 @@ public struct Call {
                     return .none
                 }
                                                                         
-                return .run { [state] send in
+                return .run { send in
                     for try await offer in await webRTCClient.offer() {
                         for try await sessionDescription in await webRTCClient.setLocalDescription(offer) {
                             let transceivers = await webRTCClient.transceivers().filter { $0.sender.track != nil }
@@ -349,9 +347,8 @@ final class CallViewController: UIViewController {
     
     override func viewDidLoad() {
         super.viewDidLoad()
-        
+    
         // PiP can't work whilst the screen recorder is running
-        
 //        pictureInPictureController = AVPictureInPictureController(contentSource: pictureInPictureControllerContentSource)
 //        pictureInPictureController?.canStartPictureInPictureAutomaticallyFromInline = false
 //        pictureInPictureController?.delegate = self
@@ -364,7 +361,7 @@ final class CallViewController: UIViewController {
             hostingViewController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             hostingViewController.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
-                
+        
         observe { [weak self] in
             guard let self else { return }
             

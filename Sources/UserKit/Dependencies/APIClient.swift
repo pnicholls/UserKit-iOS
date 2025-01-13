@@ -15,7 +15,7 @@
 import ComposableArchitecture
 import Foundation
 
-let baseURL = "https://released-winter-briefs-www.trycloudflare.com"
+let baseURL = "https://issue-sensors-sage-sheets.trycloudflare.com"
 
 actor APIClientState {
     private var accessToken: String?

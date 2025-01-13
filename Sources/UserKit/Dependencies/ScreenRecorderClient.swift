@@ -42,26 +42,15 @@ extension DependencyValues {
 }
 
 private actor Client {
-    let recorder = RPScreenRecorder.shared()
-        
     func start() -> AsyncThrowingStream<ScreenRecorderClient.Buffer, Error> {
         AsyncThrowingStream { continuation in
+            let recorder = RPScreenRecorder.shared()
             recorder.isMicrophoneEnabled = false
             recorder.isCameraEnabled = false
-            
-            recorder.startCapture { sampleBuffer, bufferType, error in
-                guard error == nil else {
-                    continuation.finish(throwing: error)
-                    return
-                }
-                
-                if bufferType == .video {
-                    continuation.yield(ScreenRecorderClient.Buffer(sampleBuffer: sampleBuffer, bufferType: bufferType))
-                }
-            } completionHandler: { error in
-                guard error == nil else {
-                    continuation.finish(throwing: error)
-                    return
+        
+            Task {
+                try await recorder.startCapture { sampleBuffer, bufferType, error in
+                    continuation.yield(with: .success(.init(sampleBuffer: sampleBuffer, bufferType: bufferType)))
                 }
             }
         }
