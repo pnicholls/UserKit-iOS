@@ -12,6 +12,7 @@ import AVFoundation
 
 public struct CameraClient {
     public var start: @Sendable () async -> AsyncThrowingStream<Buffer, Error> = { .finished() }
+    public var stop: @Sendable () async -> ()
 }
 
 extension CameraClient {
@@ -24,9 +25,14 @@ extension CameraClient {
 extension CameraClient: DependencyKey {
     public static var liveValue: CameraClient {
         let client = Client()
-        return CameraClient(start: {
-            await client.start()
-        })
+        return CameraClient(
+            start: {
+                await client.start()
+            },
+            stop: {
+                await client.stopCapture()
+            }
+        )
     }
 }
 
@@ -109,7 +115,7 @@ private actor Client: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
         }
     }
     
-    private func stopCapture() async {
+    func stopCapture() async {
         guard let session = captureSession else { return }
         
         if session.isRunning {

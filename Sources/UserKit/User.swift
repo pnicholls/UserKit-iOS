@@ -14,11 +14,13 @@ import ReplayKit
 public struct User {
     
     @Dependency(\.apiClient) var apiClient
+    @Dependency(\.cameraClient) var cameraClient
     @Dependency(\.continuousClock) var clock
+    @Dependency(\.webRTCClient) var webRTCClient
     @Dependency(\.webSocketClient) var webSocketClient
     
     @ObservableState
-    public struct State {
+    public struct State: Equatable {
         let accessToken: String
         var call: Call.State?
         let webSocket: WebSocket
@@ -103,41 +105,26 @@ public struct User {
                 case .userState(let userState):
                     if userState.call == nil {
                         state.call = nil
-                        return .none
+                        return .run { send in
+                            await webRTCClient.close()
+                            await cameraClient.stop()
+                            
+                            // TODO - audioClient
+                        }
                     }
                     
-                    var callState = state.call ?? .init(participants: [])
+                    state.call = state.call ?? .init(participants: [])
                     
-                    callState.participants = .init(uniqueElements: userState.call?.participants.filter { $0.role == .host }.map({ participantState in
-                        var participant = callState.participants[id: participantState.id] ??
-                            .init(
-                                id: participantState.id,
-                                role: .init(rawValue: participantState.role.rawValue)!,
-                                state: .init(rawValue: participantState.state.rawValue)!,
-                                sessionId: participantState.transceiverSessionId ?? "placeholder-to-do",
-                                tracks: []
-                            )
-                        participant.state = .init(rawValue: participantState.state.rawValue)!
-                        
-                        
-                        // Tracks needs to update instead of being blown away
-                        var tracks: [Participant.State.Track] = []
-                        if let id = participantState.tracks.audio, let audioEnabled = participantState.tracks.audioEnabled {
-                            let id = String(id.split(separator: "/")[1])
-                            tracks.append(.init(id: id, trackType: .audio, isEnabled: audioEnabled))
-                        }
-                        if let id = participantState.tracks.video, let videoEnabled = participantState.tracks.videoEnabled {
-                            let id = String(id.split(separator: "/")[1])
-                            tracks.append(.init(id: id, trackType: .video, isEnabled: videoEnabled))
-                        }
-                        participant.tracks = .init(uniqueElements: tracks)
-                        return participant
-                    }) ?? [])
+                    let hostParticipants = userState.call?.participants.filter { $0.role == .host } ?? []
+                    let updatedParticipants = hostParticipants.map { newParticipant in
+                        newParticipant.toParticipantState(existing: state.call?.participants[id: newParticipant.id])
+                    }
                     
-                    state.call = callState
-                    
-                    return .none
-                    
+                    state.call?.participants = .init(uniqueElements: updatedParticipants)
+                    return .merge((state.call?.participants ?? []).filter { $0.tracks.contains { $0.state == .notPulled } }.map {
+                        .send(.call(.participants(.element(id: $0.id, action: .pullTracks))))
+                    })
+
                 default:
                     break
                 }
@@ -219,6 +206,26 @@ public extension User.State.WebSocket {
             default:
                 self = .unknown
             }
+        }
+    }
+}
+
+extension User.State.WebSocket.Message.UserState.Call.Participant {
+    func toParticipantState(existing: Participant.State?) -> Participant.State {
+        if var updated = existing {
+            updated.state = .init(rawValue: state.rawValue)!
+            updated.updateTracks(from: tracks)
+            return updated
+        } else {
+            var newParticipant = Participant.State(
+                id: id,
+                role: .init(rawValue: role.rawValue)!,
+                state: .init(rawValue: state.rawValue)!,
+                sessionId: transceiverSessionId ?? "placeholder-to-do",
+                tracks: .init()
+            )
+            newParticipant.updateTracks(from: tracks)
+            return newParticipant
         }
     }
 }

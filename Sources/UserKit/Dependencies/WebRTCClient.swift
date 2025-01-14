@@ -129,12 +129,7 @@ private actor Client: NSObject {
     }()
     
     func close() async {
-        guard let peerConnection = self.peerConnection else {
-            assertionFailure("Peer connection not initialized")
-            return
-        }
-        
-        peerConnection.close()
+        peerConnection?.close()
     }
     
     func configure() async {

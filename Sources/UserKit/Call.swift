@@ -51,9 +51,9 @@ public struct Call {
         
         case apiClient(ApiClientAction)
         case appeared
+        case destination(Destination.Action)
         case participants(IdentifiedActionOf<Participant>)
         case pictureInPicture(PictureInPictureAction)
-        case destination(Destination.Action)
         case webRTC(WebRTC)
     }
     
@@ -73,6 +73,7 @@ public struct Call {
                 
             case .apiClient(.pullTracksResponse(.success(let response))):
                 guard let sessionId = state.sessionId else {
+                    assertionFailure("Pull tracks response received without session ID")
                     return .none
                 }
                 
@@ -85,6 +86,7 @@ public struct Call {
                         return
                     }
                     state.participants[id: participant.id]?.tracks[id: participantTrack.id]?.mid = track.mid
+                    state.participants[id: participant.id]?.tracks[id: participantTrack.id]?.state = .pulled
                 }
                 
                 if response.requiresImmediateRenegotiation {
@@ -106,7 +108,7 @@ public struct Call {
             case .apiClient(.pushTracksResponse(.failure(_))):
                 return .none
                 
-            case .apiClient(.pushTracksResponse(.success(let response))):                
+            case .apiClient(.pushTracksResponse(.success(let response))):
                 return .run { [state] send in
                     try await withThrowingTaskGroup(of: Void.self) { group in
                         // First do the setup work
@@ -156,7 +158,9 @@ public struct Call {
             
             case .apiClient(.postSessionResponse(.success(let response))):
                 state.sessionId = response.sessionId
-                return .send(.webRTC(.pull))
+                return .merge(state.participants.filter { $0.tracks.contains { $0.state == .notPulled } }.map {
+                    .send(.participants(.element(id: $0.id, action: .pullTracks)))
+                })
             
             case .apiClient(.renegotiateResponse(.failure(_))):
                 return .none
@@ -212,6 +216,35 @@ public struct Call {
                 
             case .destination(.requested(.decline)):
                 return .none
+                
+            case .participants(.element(id: let id, action: .pullTracks)):
+                guard let sessionId = state.sessionId, let participant = state.participants[id: id] else {
+                    return .none
+                }
+                                
+                var tracks: [APIClient.PullTracksRequest.Track] = []
+                participant.tracks.filter { $0.state == .notPulled }.forEach { track in
+                    state.participants[id: participant.id]?.tracks[id: track.id]?.state = .pulling
+
+                    tracks.append(APIClient.PullTracksRequest.Track(
+                        location: "remote",
+                        trackName: track.id,
+                        sessionId: participant.sessionId
+                    ))
+                }
+                
+                guard !tracks.isEmpty else {
+                    return .none
+                }
+                
+                return .run { [tracks] send in
+                    await send(.apiClient(.pullTracksResponse(Result {
+                        try await apiClient.request(
+                            endpoint: .pullTracks(sessionId, .init(tracks: tracks)),
+                            as: APIClient.PullTracksResponse.self
+                        )
+                    })))
+                }
                 
             case .participants(.element(id: let id, action: .setReceiver(let trackId, let receiver))):
                 guard let track = state.participants[id: id]?.tracks[id: trackId], track.trackType == .video, let track = receiver.track as? RTCVideoTrack else {
