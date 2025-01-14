@@ -17,11 +17,18 @@ public struct Participant {
     @ObservableState
     public struct State: Equatable, Identifiable {
         public struct Track: Equatable, Identifiable {
-            public enum State {
+            public enum Error: String, Equatable, Decodable {
+                case emptyTrack = "empty_track_error"
+                case `internal` = "internal_error"
+                case sessionNotReady = "session_error"
+                case unknown
+            }
+            
+            public enum State: Equatable {
                 case notPulled
                 case pulling
                 case pulled
-                case failed
+                case failed(Error)
             }
 
             public enum TrackType: String, Decodable {
@@ -35,6 +42,18 @@ public struct Participant {
             public var mid: String?
             public var receiver: RTCRtpReceiver?
             public var isEnabled: Bool
+            public var isPullRequired: Bool {
+                switch state {
+                case .notPulled:
+                    return true
+                case .failed(.emptyTrack):
+                    return true
+                case .failed(.sessionNotReady):
+                    return true
+                default:
+                    return false
+                }
+            }
         }
         
         public enum Role: String, Decodable {
@@ -51,7 +70,7 @@ public struct Participant {
         public let id: String
         public let role: Role
         public var state: State
-        public var sessionId: String
+        public var sessionId: String?
         public var tracks: IdentifiedArrayOf<Track>
     }
     

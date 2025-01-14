@@ -15,7 +15,7 @@ public struct UserKitApp {
     public struct State {
         let config: UserKit.Config
         var user: User.State?
-        var isPresented: Bool = false
+        var isPresented: Bool = true
     }
     
     public enum Action {
@@ -66,7 +66,7 @@ public struct UserKitApp {
                 }
                 
             case .user(.call(.destination(.requested(.accept)))):
-                state.isPresented = false
+//                state.isPresented = false
                 return .none
 
 //            case .user(.call(.pictureInPicture(.start))):
@@ -87,12 +87,6 @@ public struct UserKitApp {
         }
         .ifLet(\.user, action: \.user) {
             User()
-        }
-        .onChange(of: { $0.user?.call?.uuid }) { oldValue, newValue in
-            Reduce { state, action in
-                state.isPresented = oldValue == nil && newValue != nil
-                return .none
-            }
         }
     }
 }

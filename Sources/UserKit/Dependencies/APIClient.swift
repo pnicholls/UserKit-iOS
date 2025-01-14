@@ -15,7 +15,7 @@
 import ComposableArchitecture
 import Foundation
 
-let baseURL = "https://strings-lodge-straight-tony.trycloudflare.com"
+let baseURL = "https://sweet-cz-prayer-tucson.trycloudflare.com"
 
 actor APIClientState {
     private var accessToken: String?
@@ -198,11 +198,25 @@ extension APIClient {
     public struct PullTracksResponse: Codable {
         let requiresImmediateRenegotiation: Bool
         let tracks: [Track]
-        let sessionDescription: SessionDescription
+        let sessionDescription: SessionDescription?
         
         struct Track: Codable {
             let mid: String
             let trackName: String
+            let sessionId: String
+            let errorCode: String?
+            let errorDescription: String?
+        }
+        
+        var failedTracks: [(trackName: String, error: String)] {
+            return tracks.compactMap { track in
+                guard let errorDescription = track.errorDescription else { return nil }
+                return (track.trackName, errorDescription)
+            }
+        }
+        
+        var successfulTracks: [Track] {
+            return tracks.filter { $0.errorCode == nil }
         }
     }
     

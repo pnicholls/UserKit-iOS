@@ -214,6 +214,7 @@ extension User.State.WebSocket.Message.UserState.Call.Participant {
     func toParticipantState(existing: Participant.State?) -> Participant.State {
         if var updated = existing {
             updated.state = .init(rawValue: state.rawValue)!
+            updated.sessionId = transceiverSessionId
             updated.updateTracks(from: tracks)
             return updated
         } else {
@@ -221,7 +222,7 @@ extension User.State.WebSocket.Message.UserState.Call.Participant {
                 id: id,
                 role: .init(rawValue: role.rawValue)!,
                 state: .init(rawValue: state.rawValue)!,
-                sessionId: transceiverSessionId ?? "placeholder-to-do",
+                sessionId: transceiverSessionId,
                 tracks: .init()
             )
             newParticipant.updateTracks(from: tracks)
