@@ -158,6 +158,12 @@ public struct Call {
                                     await webRTCClient.handleVideoSourceBuffer(buffer.sampleBuffer)
                                 }
                             }
+                            
+                            group.addTask {
+                                for try await buffer in await screenRecorderClient.start() {
+                                    await webRTCClient.handleScreenShareSourceBuffer(buffer.sampleBuffer)
+                                }
+                            }
                         }
                     }
                 )
