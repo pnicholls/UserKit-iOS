@@ -64,7 +64,7 @@ public class UserKit {
         }
                 
         self.store = Store.init(initialState: UserKitApp.State(config: .init(api: .init(key: apiKey)))) {
-            UserKitApp()._printChanges()
+            UserKitApp()
         }
     }
     
@@ -135,7 +135,7 @@ extension UserKit {
 }
 
 struct RootView: View {
-    @Bindable var store: StoreOf<UserKitApp>
+    @Perception.Bindable var store: StoreOf<UserKitApp>
 
     var body: some View {
         if let store = store.scope(state: \.user, action: \.user) {

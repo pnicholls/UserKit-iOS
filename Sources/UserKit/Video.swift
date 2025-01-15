@@ -34,7 +34,9 @@ struct VideoView: View {
    @State var store: StoreOf<Video>
    
    var body: some View {
-       TrackView(track: store.track)
+       WithPerceptionTracking {
+           TrackView(track: store.track)
+       }
    }
 }
 

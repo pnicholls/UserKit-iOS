@@ -23,7 +23,7 @@ public struct Requested {
 
 struct RequestedView: View {
     @Environment(\.colorScheme) var colorScheme
-    @Bindable var store: StoreOf<Requested>
+    @Perception.Bindable var store: StoreOf<Requested>
     
     var body: some View {
         WithPerceptionTracking {

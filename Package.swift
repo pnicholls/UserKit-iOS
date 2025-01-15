@@ -6,7 +6,7 @@ import PackageDescription
 let package = Package(
     name: "UserKit",
     platforms: [
-        .iOS("17.0")
+        .iOS("16.0")
     ],
     products: [
         // Products define the executables and libraries a package produces, making them visible to other packages.

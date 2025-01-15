@@ -36,7 +36,7 @@ public struct Active {
 
 struct ActiveView: View {
     @Environment(\.colorScheme) var colorScheme
-    @Bindable var store: StoreOf<Active>
+    @Perception.Bindable var store: StoreOf<Active>
     
     var body: some View {
         WithPerceptionTracking {
@@ -46,7 +46,7 @@ struct ActiveView: View {
                 }
                 
                 Spacer()
-                                
+                
                 VStack(spacing: 12) {
                     Button(action: { store.send(.continue) }) {
                         Text("Continue Call")

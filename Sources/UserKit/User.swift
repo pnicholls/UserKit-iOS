@@ -121,6 +121,7 @@ public struct User {
                     }
                     
                     state.call?.participants = .init(uniqueElements: updatedParticipants)
+                    
                     return .merge((state.call?.participants ?? []).filter { $0.tracks.contains { $0.state == .notPulled } }.map {
                         .send(.call(.participants(.element(id: $0.id, action: .pullTracks))))
                     })
@@ -136,7 +137,7 @@ public struct User {
             }
         }
         .ifLet(\.call, action: \.call) {
-            Call()
+            Call()._printChanges()
         }
     }
 }
@@ -232,13 +233,15 @@ extension User.State.WebSocket.Message.UserState.Call.Participant {
 }
 
 struct UserView: View {
-    @Bindable var store: StoreOf<User>
+    @Perception.Bindable var store: StoreOf<User>
 
     var body: some View {
-        if let store = store.scope(state: \.call, action: \.call) {
-            CallViewControllerRepresentable(store: store)
-        } else {
-            EmptyView()
+        WithPerceptionTracking {
+            if let store = store.scope(state: \.call, action: \.call) {
+                CallViewControllerRepresentable(store: store)
+            } else {
+                EmptyView()
+            }
         }
     }
 }

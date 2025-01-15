@@ -92,19 +92,22 @@ public struct Call {
                         state.participants[id: participant.id]?.tracks[id: participantTrack.id]?.state = .failed(.init(rawValue: errorCode) ?? .unknown)
                     }
                 }
-                
+  
                 if let sessionDescription = response.sessionDescription, response.requiresImmediateRenegotiation {
-                    return .run { send in
-                        for try await _ in await webRTCClient.setRemoteDescription(.init(sdp: sessionDescription.sdp, type: .offer)) {
-                            for try await sessionDescription in await webRTCClient.answer() {
-                                for try await sessionDescription in await webRTCClient.setLocalDescription(sessionDescription) {
-                                    await send(.apiClient(.renegotiateResponse(Result {
-                                        try await apiClient.request(endpoint: .renegotiate(sessionId, .init(sessionDescription: .init(sdp: sessionDescription.sdp, type: "answer"))), as: APIClient.RenegotiateResponse.self)
-                                    })))
+                    return .concatenate(
+                        .run { send in
+                            for try await _ in await webRTCClient.setRemoteDescription(.init(sdp: sessionDescription.sdp, type: .offer)) {
+                                for try await sessionDescription in await webRTCClient.answer() {
+                                    for try await sessionDescription in await webRTCClient.setLocalDescription(sessionDescription) {
+                                        await send(.apiClient(.renegotiateResponse(Result {
+                                            try await apiClient.request(endpoint: .renegotiate(sessionId, .init(sessionDescription: .init(sdp: sessionDescription.sdp, type: "answer"))), as: APIClient.RenegotiateResponse.self)
+                                        })))
+                                    }
                                 }
                             }
-                        }
-                    }
+                        },
+                        .send(.webRTC(.push))
+                    )
                 }
                 
                 return .run { [participants = state.participants] send in
@@ -155,12 +158,6 @@ public struct Call {
                                     await webRTCClient.handleVideoSourceBuffer(buffer.sampleBuffer)
                                 }
                             }
-                            
-                            group.addTask {
-                                for try await buffer in await screenRecorderClient.start() {
-                                    await webRTCClient.handleScreenShareSourceBuffer(buffer.sampleBuffer)
-                                }
-                            }
                         }
                     }
                 )
@@ -170,9 +167,19 @@ public struct Call {
             
             case .apiClient(.postSessionResponse(.success(let response))):
                 state.sessionId = response.sessionId
-                return .merge(state.participants.filter { $0.tracks.contains { $0.isPullRequired } }.map {
-                    .send(.participants(.element(id: $0.id, action: .pullTracks)))
-                })
+                switch state.destination {
+                case .active:
+                    return .concatenate(
+                        .run { send in
+                            await webRTCClient.configure()
+                        },
+                        .merge(state.participants.filter { $0.tracks.contains { $0.isPullRequired } }.map {
+                            .send(.participants(.element(id: $0.id, action: .pullTracks)))
+                        })
+                    )
+                default:
+                    return .none
+                }
             
             case .apiClient(.renegotiateResponse(.failure(_))):
                 return .none
@@ -189,25 +196,15 @@ public struct Call {
                                 }
                             }
                         }
-                    },
-                    .send(.webRTC(.push))
+                    }
                 )
                                                 
             case .appeared:
-                return .concatenate(
-                    .run { send in
-                        await audioSessionClient.configure()
-                        await audioSessionClient.addNotificationObservers() // TODO: Remove observers when required
-                    },
-                    .run { send in
-                        await webRTCClient.configure()
-                    },
-                    .run { send in
-                        await send(.apiClient(.postSessionResponse(Result {
-                            try await apiClient.request(endpoint: .postSession(.init()), as: APIClient.PostSessionResponse.self)
-                        })))
-                    }
-                )
+                return .run { send in
+                    await send(.apiClient(.postSessionResponse(Result {
+                        try await apiClient.request(endpoint: .postSession(.init()), as: APIClient.PostSessionResponse.self)
+                    })))
+                }
                 
             case .destination(.active(.continue)):
                 state.isPictureInPictureActive = true
@@ -220,12 +217,28 @@ public struct Call {
                     await webRTCClient.close()
                     await audioSessionClient.removeNotificationObservers()
                 }
+                                
+            case .destination(.active):
+                return .none
                 
             case .destination(.requested(.accept)):
                 state.destination = .active(.init(video: state.videoTrack != nil ? .init(track: state.videoTrack!) : nil))
                 state.isPictureInPictureActive = true
-                return .none
                 
+                switch state.sessionId {
+                case .some:
+                    return .concatenate(
+                        .run { send in
+                            await webRTCClient.configure()
+                        },
+                        .merge(state.participants.filter { $0.tracks.contains { $0.isPullRequired } }.map {
+                            .send(.participants(.element(id: $0.id, action: .pullTracks)))
+                        })
+                    )
+                default:
+                    return .none
+                }
+                                
             case .destination(.requested(.decline)):
                 return .none
                 
@@ -263,6 +276,14 @@ public struct Call {
                     return .none
                 }
                 state.videoTrack = track
+                
+                switch state.destination {
+                case .active(var activeState):
+                    activeState.video = .init(track: track)
+                    state.destination = .active(activeState)
+                default:
+                    break
+                }
                 
                 return .none
                                                 

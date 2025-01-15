@@ -228,7 +228,7 @@ private actor Client: NSObject {
                 return continuation.finish(throwing: NoPeerConnectionError())
             }
             
-            let constraints = RTCMediaConstraints(mandatoryConstraints: self.mediaConstraints,
+            let constraints = RTCMediaConstraints(mandatoryConstraints: nil,
                                                  optionalConstraints: nil)
             peerConnection.offer(for: constraints) { (sdp, error) in
                 guard error == nil else {
@@ -253,7 +253,7 @@ private actor Client: NSObject {
                 return continuation.finish(throwing: NoPeerConnectionError())
             }
             
-            let constraints = RTCMediaConstraints(mandatoryConstraints: self.mediaConstraints,
+            let constraints = RTCMediaConstraints(mandatoryConstraints: nil,
                                                  optionalConstraints: nil)
             peerConnection.answer(for: constraints) { (sdp, error) in
                 guard error == nil else {
@@ -277,6 +277,8 @@ private actor Client: NSObject {
                 struct NoPeerConnectionError: Error {}
                 return continuation.finish(throwing: NoPeerConnectionError())
             }
+            
+            print(sessionDescription.rtcSessionDescription)
             
             peerConnection.setLocalDescription(sessionDescription.rtcSessionDescription) { error in
                 guard error == nil else {
