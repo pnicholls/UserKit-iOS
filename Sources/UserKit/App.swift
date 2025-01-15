@@ -66,7 +66,7 @@ public struct UserKitApp {
                 }
                 
             case .user(.call(.destination(.requested(.accept)))):
-//                state.isPresented = false
+                state.isPresented = false
                 return .none
 
 //            case .user(.call(.pictureInPicture(.start))):
