@@ -11,7 +11,7 @@ import DependenciesMacros
 import ReplayKit
 
 public struct ScreenRecorderClient {
-    public var start: @Sendable () async -> AsyncThrowingStream<Buffer, Error> = {  .finished() }
+    public var start: @Sendable () async -> AsyncThrowingStream<Buffer, Error> = { .finished() }
 }
 
 extension ScreenRecorderClient {
@@ -22,35 +22,43 @@ extension ScreenRecorderClient {
 }
 
 extension ScreenRecorderClient: DependencyKey {
-    
     public static var liveValue: ScreenRecorderClient {
         let client = Client()
         return ScreenRecorderClient(start: {
             await client.start()
         })
     }
-    
 }
 
 extension DependencyValues {
-    
     public var screenRecorderClient: ScreenRecorderClient {
         get { self[ScreenRecorderClient.self] }
         set { self[ScreenRecorderClient.self] = newValue }
     }
-    
 }
 
 private actor Client {
     func start() -> AsyncThrowingStream<ScreenRecorderClient.Buffer, Error> {
         AsyncThrowingStream { continuation in
-            let recorder = RPScreenRecorder.shared()
-            recorder.isMicrophoneEnabled = false
-            recorder.isCameraEnabled = false
-        
-            Task {
-                try await recorder.startCapture { sampleBuffer, bufferType, error in
-                    continuation.yield(with: .success(.init(sampleBuffer: sampleBuffer, bufferType: bufferType)))
+            Task { @MainActor in
+                let recorder = RPScreenRecorder.shared()
+                recorder.isMicrophoneEnabled = false
+                recorder.isCameraEnabled = false
+
+                
+                
+                do {
+                    try await recorder.startCapture { sampleBuffer, bufferType, error in
+                        if let error = error {
+                            continuation.finish(throwing: error)
+                        } else {
+                            continuation.yield(
+                                .init(sampleBuffer: sampleBuffer, bufferType: bufferType)
+                            )
+                        }
+                    }
+                } catch {
+                    continuation.finish(throwing: error)
                 }
             }
         }

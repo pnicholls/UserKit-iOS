@@ -127,43 +127,33 @@ public struct Call {
                         _  = await webRTCClient.setRemoteDescription(.init(sdp: response.sessionDescription.sdp, type: .answer))
                     },
                     .run { [state] send in
-                        try await withThrowingTaskGroup(of: Void.self) { group in
-                            let tracks: [String: Any] = [
-                                "audioEnabled": true,
-                                "videoEnabled": true,
-                                "screenShareEnabled": true,
-                                "video": "\(state.sessionId!)/videoSourceTrackId",
-                                "audio": "\(state.sessionId!)/audio0",
-                                "screenshare": "\(state.sessionId!)/screenShareSourceTrackId"
-                            ]
+                        let tracks: [String: Any] = [
+                            "audioEnabled": true,
+                            "videoEnabled": true,
+                            "screenShareEnabled": true,
+                            "video": "\(state.sessionId!)/videoSourceTrackId",
+                            "audio": "\(state.sessionId!)/audio0",
+                            "screenshare": "\(state.sessionId!)/screenShareSourceTrackId"
+                        ]
 
-                            let participant: [String: Any] = [
-                                "state": "none",
-                                "transceiverSessionId": state.sessionId!,
-                                "tracks": tracks
-                            ]
+                        let participant: [String: Any] = [
+                            "state": "none",
+                            "transceiverSessionId": state.sessionId!,
+                            "tracks": tracks
+                        ]
 
-                            let participantUpdate: [String: Any] = [
-                                "type": "participantUpdate",
-                                "participant": participant
-                            ]
+                        let participantUpdate: [String: Any] = [
+                            "type": "participantUpdate",
+                            "participant": participant
+                        ]
 
-                            let jsonData = try JSONSerialization.data(withJSONObject: participantUpdate, options: .prettyPrinted)
-                            if let jsonString = String(data: jsonData, encoding: .utf8) {
-                                try await webSocketClient.send(id: WebSocketClient.ID(), message: .string(jsonString))
-                            }
-                            
-                            group.addTask {
-                                for try await buffer in await cameraClient.start() {
-                                    await webRTCClient.handleVideoSourceBuffer(buffer.sampleBuffer)
-                                }
-                            }
-                            
-                            group.addTask {
-                                for try await buffer in await screenRecorderClient.start() {
-                                    await webRTCClient.handleScreenShareSourceBuffer(buffer.sampleBuffer)
-                                }
-                            }
+                        let jsonData = try JSONSerialization.data(withJSONObject: participantUpdate, options: .prettyPrinted)
+                        if let jsonString = String(data: jsonData, encoding: .utf8) {
+                            try await webSocketClient.send(id: WebSocketClient.ID(), message: .string(jsonString))
+                        }
+                        
+                        for try await buffer in await cameraClient.start() {
+                            await webRTCClient.handleVideoSourceBuffer(buffer.sampleBuffer)
                         }
                     }
                 )
@@ -391,10 +381,9 @@ final class CallViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
     
-        // PiP can't work whilst the screen recorder is running
-//        pictureInPictureController = AVPictureInPictureController(contentSource: pictureInPictureControllerContentSource)
-//        pictureInPictureController?.canStartPictureInPictureAutomaticallyFromInline = false
-//        pictureInPictureController?.delegate = self
+        pictureInPictureController = AVPictureInPictureController(contentSource: pictureInPictureControllerContentSource)
+        pictureInPictureController?.canStartPictureInPictureAutomaticallyFromInline = false
+        pictureInPictureController?.delegate = self
         
         view.addSubview(hostingViewController.view)
                 

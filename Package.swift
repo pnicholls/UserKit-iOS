@@ -16,8 +16,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/pointfreeco/swift-composable-architecture", from: "1.10.0"),
-        .package(url: "https://github.com/stasel/WebRTC", from: "128.0.0"),
-        .package(url: "https://github.com/KaneCheshire/ShowTime", from: "2.5.3")
+        .package(url: "https://github.com/stasel/WebRTC", from: "128.0.0")
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
@@ -26,8 +25,7 @@ let package = Package(
             name: "UserKit",
             dependencies: [
                 .product(name: "ComposableArchitecture", package: "swift-composable-architecture"),
-                .product(name: "WebRTC", package: "WebRTC"),
-                .product(name: "ShowTime", package: "ShowTime")
+                .product(name: "WebRTC", package: "WebRTC")
             ]
         ),
         .testTarget(
