@@ -64,7 +64,7 @@ public class UserKit {
         }
                 
         self.store = Store.init(initialState: UserKitApp.State(config: .init(api: .init(key: apiKey)))) {
-            UserKitApp()
+            UserKitApp()._printChanges()
         }
     }
     
