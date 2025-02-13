@@ -78,17 +78,17 @@ public class UserKit {
             return
         }
         
-//        window = windowScene.windows.first
+        window = windowScene.windows.first
         
-        window = UIWindow(windowScene: windowScene)
-                        
-        let rootViewController = UIViewController()
-        rootViewController.view.backgroundColor = .clear
-        
-        window?.rootViewController = rootViewController
-
-        window?.windowLevel = .statusBar
-        window?.isHidden = true
+//        window = UIWindow(windowScene: windowScene)
+//                        
+//        let rootViewController = UIViewController()
+//        rootViewController.view.backgroundColor = .clear
+//        
+//        window?.rootViewController = rootViewController
+//
+//        window?.windowLevel = .statusBar
+//        window?.isHidden = true
         
         store?.send(.configured)
     }
@@ -102,7 +102,7 @@ public class UserKit {
         let hostingViewController = CustomHostingController(rootView: rootView)
         
         hostingViewController.onDismiss = { [weak self] in
-            self?.window?.isHidden = true
+//            self?.window?.isHidden = true
             store.send(.dismiss)
         }
 
@@ -117,7 +117,7 @@ public class UserKit {
             }
 
             self.window?.makeKeyAndVisible()
-            self.window?.isHidden = false
+//            self.window?.isHidden = false
             
             if self.window?.rootViewController?.presentedViewController == nil {
                 self.window?.rootViewController?.present(hostingViewController, animated: true)
