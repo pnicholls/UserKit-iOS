@@ -15,7 +15,7 @@ public struct UserKitApp {
     public struct State {
         let config: UserKit.Config
         var user: User.State?
-        var isPresented: Bool = true
+        var isPresented: Bool = false
     }
     
     public enum Action {
@@ -69,17 +69,17 @@ public struct UserKitApp {
                 state.isPresented = false
                 return .none
 
-//            case .user(.call(.pictureInPicture(.start))):
-//                state.isPresented = false
-//                return .none
-//
-//            case .user(.call(.pictureInPicture(.stop))):
-//                state.isPresented = true
-//                return .none
-//                
-//            case .user(.call(.pictureInPicture(.restore))):
-//                state.isPresented = true
-//                return .none
+            case .user(.call(.pictureInPicture(.start))):
+                state.isPresented = false
+                return .none
+
+            case .user(.call(.pictureInPicture(.stop))):
+                state.isPresented = true
+                return .none
+                
+            case .user(.call(.pictureInPicture(.restore))):
+                state.isPresented = true
+                return .none
                                 
             case .user:
                 return .none
@@ -87,6 +87,22 @@ public struct UserKitApp {
         }
         .ifLet(\.user, action: \.user) {
             User()
+        }
+        .onChange(of: { $0.user?.call }) { oldValue, newValue in
+            Reduce { state, action in
+                switch (newValue) {
+                case .some(let callState) where callState.isPictureInPictureActive:
+                    state.isPresented = false
+                case .some(let callState) where callState.isPictureInPictureActive == false:
+                    state.isPresented = true
+                case .none:
+                    state.isPresented = false
+                default:
+                    state.isPresented = false
+                }
+                
+                return .none
+            }
         }
     }
 }

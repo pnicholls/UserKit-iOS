@@ -78,6 +78,8 @@ public class UserKit {
             return
         }
         
+//        window = windowScene.windows.first
+        
         window = UIWindow(windowScene: windowScene)
                         
         let rootViewController = UIViewController()

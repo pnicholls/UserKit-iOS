@@ -45,8 +45,6 @@ private actor Client {
                 recorder.isMicrophoneEnabled = false
                 recorder.isCameraEnabled = false
 
-                
-                
                 do {
                     try await recorder.startCapture { sampleBuffer, bufferType, error in
                         if let error = error {

@@ -26,7 +26,7 @@ public struct WebSocketClient {
     }
 
     @CasePathable
-    public enum Action {
+    public enum Action: Equatable {
         case didOpen(protocol: String?)
         case didClose(code: URLSessionWebSocketTask.CloseCode, reason: Data?)
     }

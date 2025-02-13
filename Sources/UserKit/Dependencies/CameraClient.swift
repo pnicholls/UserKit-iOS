@@ -11,6 +11,7 @@ import DependenciesMacros
 import AVFoundation
 
 public struct CameraClient {
+    public var requestAccess: @Sendable () async -> Bool
     public var start: @Sendable () async -> AsyncThrowingStream<Buffer, Error> = { .finished() }
     public var stop: @Sendable () async -> ()
 }
@@ -26,6 +27,9 @@ extension CameraClient: DependencyKey {
     public static var liveValue: CameraClient {
         let client = Client()
         return CameraClient(
+            requestAccess: {
+                await client.requestAccess()
+            },
             start: {
                 await client.start()
             },
@@ -48,6 +52,10 @@ private actor Client: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     private var videoDataOutput: AVCaptureVideoDataOutput?
     private let captureQueue = DispatchQueue(label: "com.camera.capture")
     private var continuation: AsyncThrowingStream<CameraClient.Buffer, Error>.Continuation?
+    
+    func requestAccess() async -> Bool {
+        return await AVCaptureDevice.requestAccess(for: .video)
+    }
     
     func start() -> AsyncThrowingStream<CameraClient.Buffer, Error> {
         AsyncThrowingStream { continuation in

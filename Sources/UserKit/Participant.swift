@@ -16,46 +16,6 @@ public struct Participant {
 
     @ObservableState
     public struct State: Equatable, Identifiable {
-        public struct Track: Equatable, Identifiable {
-            public enum Error: String, Equatable, Decodable {
-                case emptyTrack = "empty_track_error"
-                case `internal` = "internal_error"
-                case sessionNotReady = "session_error"
-                case unknown
-            }
-            
-            public enum State: Equatable {
-                case notPulled
-                case pulling
-                case pulled
-                case failed(Error)
-            }
-
-            public enum TrackType: String, Decodable {
-                case video
-                case audio
-            }
-
-            public let id: String
-            public var state: State
-            public let trackType: TrackType
-            public var mid: String?
-            public var receiver: RTCRtpReceiver?
-            public var isEnabled: Bool
-            public var isPullRequired: Bool {
-                switch state {
-                case .notPulled:
-                    return true
-                case .failed(.emptyTrack):
-                    return true
-                case .failed(.sessionNotReady):
-                    return true
-                default:
-                    return false
-                }
-            }
-        }
-        
         public enum Role: String, Decodable {
             case host
             case user
@@ -71,53 +31,74 @@ public struct Participant {
         public let role: Role
         public var state: State
         public var sessionId: String?
-        public var tracks: IdentifiedArrayOf<Track>
+        public var tracks: IdentifiedArrayOf<Track.State>
     }
     
     public enum Action {
+        case `init`
         case pullTracks
         case setReceiver(String, RTCRtpReceiver)
+        case tracks(IdentifiedActionOf<Track>)
+        case update(User.State.WebSocket.Message.UserState.Call.Participant)
     }
     
     public var body: some Reducer<State, Action> {
         Reduce { state, action in
             switch action {
+            case .`init`:
+                return .merge(state.tracks.map { .send(.tracks(.element(id: $0.id, action: .`init`))) })
+                
             case .pullTracks:
                 return .none
                 
             case .setReceiver(let trackId, let receiver):
                 state.tracks[id: trackId]?.receiver = receiver
                 return .none
+                
+            case .tracks:
+                return .none
+                
+            case .update(let participant):
+                state.sessionId = participant.transceiverSessionId
+                state.state = .init(rawValue: participant.state.rawValue)!
+                
+                let newTracks: [Track.State] = participant.tracks.compactMap { track in
+                    guard let id = track.id else { return nil }
+                    
+                    if let _ = state.tracks[id: id] {
+                        return nil
+                    }
+                    
+                    return .init(
+                        id: String(id.split(separator: "/")[1]),
+                        state: .init(rawValue: track.state.rawValue)!,
+                        pullState: .notPulled,
+                        pushState: .pushed,
+                        type: .init(rawValue: track.type.rawValue)!
+                    )
+                }
+                
+                state.tracks.append(contentsOf: newTracks)
+                
+                let existingTracks: [(Track.State, User.State.WebSocket.Message.UserState.Call.Participant.Track)] = participant.tracks.compactMap { existingTrack in
+                    guard let id = existingTrack.id, let track = state.tracks[id: String(id.split(separator: "/")[1])] else {
+                        return nil
+                    }
+                    return (track, existingTrack)
+                }
+                
+                return .merge(
+                    .merge(newTracks.map { .send(.tracks(.element(id: $0.id, action: .`init`))) }),
+                    .merge(existingTracks.map { .send(.tracks(.element(id: $0.0.id, action: .update($0.1)))) })
+                )
             }
         }
-    }
-}
-
-extension Participant.State {
-    mutating func updateTracks(from newTracks: User.State.WebSocket.Message.UserState.Call.Participant.Tracks) {
-        if let audioId = newTracks.audio,
-           let audioEnabled = newTracks.audioEnabled {
-            let trackId = String(audioId.split(separator: "/")[1])
-            
-            if let existingTrack = tracks[id: trackId] {
-                var updatedTrack = existingTrack
-                updatedTrack.isEnabled = audioEnabled
-                tracks.updateOrAppend(updatedTrack)
-            } else {
-                tracks.append(.init(id: trackId, state: .notPulled, trackType: .audio, isEnabled: audioEnabled))
-            }
+        .forEach(\.tracks, action: \.tracks) {
+            Track()
         }
-        
-        if let videoId = newTracks.video,
-           let videoEnabled = newTracks.videoEnabled {
-            let trackId = String(videoId.split(separator: "/")[1])
-            
-            if let existingTrack = tracks[id: trackId] {
-                var updatedTrack = existingTrack
-                updatedTrack.isEnabled = videoEnabled
-                tracks.updateOrAppend(updatedTrack)
-            } else {
-                tracks.append(.init(id: trackId, state: .notPulled, trackType: .video, isEnabled: videoEnabled))
+        .onChange(of: { $0.tracks }) { oldValue, newValue in
+            Reduce { state, action in
+                return .none
             }
         }
     }

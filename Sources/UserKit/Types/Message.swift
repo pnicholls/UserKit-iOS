@@ -12,6 +12,20 @@ enum Message: Decodable {
         let id: String
         let call: Call?
     }
+    
+    public struct Track: Decodable, Equatable {
+        public enum State: String, Decodable {
+            case active, requested, inactive
+        }
+        
+        public enum TrackType: String, Decodable {
+            case audio, video, screenShare
+        }
+        
+        public let state: State
+        public let id: String?
+        public let type: TrackType
+    }
 
     struct Call: Equatable, Decodable {
         struct Participant: Decodable, Equatable {
@@ -23,13 +37,14 @@ enum Message: Decodable {
             let id: String
             let role: Role
             let transceiverSessionId: String?
-            let tracks: Tracks
+            let tracks: [Track]
         }
         
         let participants: [Participant]
     }
-
+    
     case userState(UserState)
+    case userSocketPong
     case unknown
     
     enum CodingKeys: String, CodingKey {
@@ -38,7 +53,8 @@ enum Message: Decodable {
     }
     
     enum MessageType: String, Decodable, Equatable {
-        case userState
+        case userState = "userState"
+        case userSocketPong = "user-socket-pong"
     }
     
     init(from decoder: Decoder) throws {
@@ -49,16 +65,10 @@ enum Message: Decodable {
         case .userState:
             let state = try container.decode(UserState.self, forKey: .state)
             self = .userState(state)
+        case .userSocketPong:
+            self = .userSocketPong
         case .none:
             self = .unknown
         }
     }
-}
-
-public struct Tracks: Decodable, Equatable {
-    let audioEnabled: Bool?
-    let videoEnabled: Bool?
-    let screenShareEnabled: Bool?
-    let video: String?
-    let audio: String?
 }

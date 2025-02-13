@@ -17,6 +17,7 @@ public struct WebRTCClient {
     public var offer: @Sendable () async -> AsyncThrowingStream<SessionDescription, Error> = {  .finished() }
     public var setLocalDescription: @Sendable (_ sessionDescription: SessionDescription) async -> AsyncThrowingStream<SessionDescription, Error> = { _ in .finished() }
     public var localDescription: @Sendable () async -> SessionDescription
+    public var localTransceivers: @Sendable () async -> [String: RTCRtpTransceiver]
     public var transceivers: @Sendable () async -> [RTCRtpTransceiver]
     public var setRemoteDescription: @Sendable (_ sessionDescription: SessionDescription) async -> AsyncThrowingStream<SessionDescription, Error> = { _ in .finished() }
     public var handleVideoSourceBuffer: @Sendable (_ sampleBuffer: CMSampleBuffer) async -> ()
@@ -89,6 +90,8 @@ extension WebRTCClient: DependencyKey {
             await client.setLocalDescription(sessionDescription: sessionDescription)
         }, localDescription: {
             await client.localDescription()
+        }, localTransceivers: {
+            await client.localTransceivers
         }, transceivers: {
             await client.transceivers()
         }, setRemoteDescription: { sessionDescription in
@@ -103,12 +106,10 @@ extension WebRTCClient: DependencyKey {
 }
 
 extension DependencyValues {
-    
     public var webRTCClient: WebRTCClient {
         get { self[WebRTCClient.self] }
         set { self[WebRTCClient.self] = newValue }
     }
-    
 }
 
 private actor Client: NSObject {
@@ -118,6 +119,7 @@ private actor Client: NSObject {
     var videoCapturer: RTCVideoCapturer?
     var screenShareSource: RTCVideoSource?
     var screenShareCapturer: RTCVideoCapturer?
+    var localTransceivers: [String: RTCRtpTransceiver] = [:]
     private let mediaConstraints = [kRTCMediaConstraintsOfferToReceiveAudio: kRTCMediaConstraintsValueTrue,
                                    kRTCMediaConstraintsOfferToReceiveVideo: kRTCMediaConstraintsValueTrue]
     
@@ -165,17 +167,17 @@ private actor Client: NSObject {
         let audioConstrains = RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil)
         let audioSource = Client.factory.audioSource(with: audioConstrains)
         
-        let audioTrack = Client.factory.audioTrack(with: audioSource, trackId: "audio0")
+        let audioTrack = Client.factory.audioTrack(with: audioSource, trackId: UUID().uuidString)
         
         let transceiverInit = RTCRtpTransceiverInit()
         transceiverInit.direction = .sendOnly
         
-        self.peerConnection?.addTransceiver(with: audioTrack, init: transceiverInit)
+        localTransceivers["audio"] = self.peerConnection?.addTransceiver(with: audioTrack, init: transceiverInit)
     }
     
     func addVideoTrack() {
         self.videoSource = Client.factory.videoSource()
-        let videoTrack = Client.factory.videoTrack(with: videoSource!, trackId: "videoSourceTrackId")
+        let videoTrack = Client.factory.videoTrack(with: videoSource!, trackId: UUID().uuidString)
         self.videoCapturer = RTCVideoCapturer(delegate: videoSource!)
         
         let transceiverInit = RTCRtpTransceiverInit()
@@ -184,6 +186,8 @@ private actor Client: NSObject {
         guard let transceiver = self.peerConnection?.addTransceiver(with: videoTrack, init: transceiverInit) else {
             return
         }
+        
+        localTransceivers["video"] = transceiver
         
         let parameters = transceiver.sender.parameters
         
@@ -199,15 +203,18 @@ private actor Client: NSObject {
     
     func addScreenShareTrack() {
         self.screenShareSource = Client.factory.videoSource()
-        let screenShareTrack = Client.factory.videoTrack(with: screenShareSource!, trackId: "screenShareSourceTrackId")
+        let screenShareTrack = Client.factory.videoTrack(with: screenShareSource!, trackId: UUID().uuidString)
         self.screenShareCapturer = RTCVideoCapturer(delegate: screenShareSource!)
         
         let transceiverInit = RTCRtpTransceiverInit()
         transceiverInit.direction = .sendOnly
         
+        
         guard let transceiver = self.peerConnection?.addTransceiver(with: screenShareTrack, init: transceiverInit) else {
             return
         }
+        
+        localTransceivers["screenShare"] = transceiver
         
         let parameters = transceiver.sender.parameters
         
@@ -220,7 +227,7 @@ private actor Client: NSObject {
             transceiver.sender.parameters = parameters
         }
     }
-        
+            
     func offer() -> AsyncThrowingStream<WebRTCClient.SessionDescription, Error> {
         AsyncThrowingStream { continuation in
             guard let peerConnection = peerConnection else {

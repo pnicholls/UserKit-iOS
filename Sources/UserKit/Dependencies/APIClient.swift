@@ -15,6 +15,7 @@
 import ComposableArchitecture
 import Foundation
 
+//let baseURL = "https://convenience-knowledgestorm-ca-seems.trycloudflare.com"
 let baseURL = "https://getuserkit.com"
 
 actor APIClientState {
@@ -195,12 +196,12 @@ extension APIClient {
         }
     }
     
-    public struct PullTracksResponse: Codable {
+    public struct PullTracksResponse: Codable, Equatable {
         let requiresImmediateRenegotiation: Bool
         let tracks: [Track]
         let sessionDescription: SessionDescription?
         
-        struct Track: Codable {
+        struct Track: Codable, Equatable {
             let mid: String
             let trackName: String
             let sessionId: String
@@ -231,12 +232,12 @@ extension APIClient {
         }
     }
     
-    public struct PushTracksResponse: Codable {
+    public struct PushTracksResponse: Codable, Equatable {
         let requiresImmediateRenegotiation: Bool
         let tracks: [Track]
         let sessionDescription: SessionDescription
         
-        struct Track: Codable {
+        struct Track: Codable, Equatable {
             let mid: String
             let trackName: String
         }
@@ -246,7 +247,7 @@ extension APIClient {
         let sessionDescription: SessionDescription
     }
     
-    public struct RenegotiateResponse: Codable {}
+    public struct RenegotiateResponse: Codable, Equatable {}
 }
 
 extension APIClient: DependencyKey {
@@ -266,9 +267,18 @@ extension APIClient: DependencyKey {
             if let body = route.body {
                 let json = try! encoder.encode(body)
                 request.httpBody = json
+                
+                print("Raw JSON Request: \(String(data: json, encoding: .utf8))")
             }
-                    
+            
             let (data, _) = try await URLSession.shared.data(for: request)
+            
+            // Print raw JSON response
+            if let jsonString = String(data: data, encoding: .utf8) {
+                print("Raw JSON Response: \(jsonString)")
+            } else {
+                print("Unable to convert response data to string")
+            }
             
             return data
         })

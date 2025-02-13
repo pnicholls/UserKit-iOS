@@ -23,7 +23,7 @@ public struct User {
     public struct State: Equatable {
         let accessToken: String
         var call: Call.State?
-        let webSocket: WebSocket
+        var webSocket: WebSocket
         
         public struct WebSocket: Equatable {
             public enum State: Equatable {
@@ -31,7 +31,7 @@ public struct User {
                 case connecting
                 case disconnected
             }
-            let state: State = .disconnected
+            var state: State = .disconnected
             let url: URL
         }
     }
@@ -41,9 +41,11 @@ public struct User {
         case webSocket(WebSocket)
         case `init`
         
+        @CasePathable
         public enum WebSocket {
             case connect
             case client(WebSocketClient.Action)
+            case disconnect
             case receivedSocketMessage(Result<WebSocketClient.Message, any Error>)
         }
     }
@@ -57,8 +59,11 @@ public struct User {
             case .webSocket(.connect):
                 switch state.webSocket.state {
                 case .connected, .connecting:
-                    return .none
+                    return .cancel(id: WebSocketClient.ID())
+                    
                 case .disconnected:
+                    state.webSocket.state = .connecting
+                    
                     return .run { [state] send in
                         let actions = await webSocketClient.open(id: WebSocketClient.ID(), url: state.webSocket.url, protocols: [])
                         await withThrowingTaskGroup(of: Void.self) { group in
@@ -87,10 +92,15 @@ public struct User {
                 }
             
             case .webSocket(.client(.didClose)):
-                return .none
-                
+                state.webSocket.state = .disconnected
+                return .cancel(id: WebSocketClient.ID())
+
             case .webSocket(.client(.didOpen)):
+                state.webSocket.state = .connected
                 return .none
+            
+            case .webSocket(.disconnect):
+                return .cancel(id: WebSocketClient.ID())
                 
             case .webSocket(.receivedSocketMessage(.failure)):
                 return .none
@@ -100,34 +110,58 @@ public struct User {
                 return .none
                 
             case .webSocket(.receivedSocketMessage(.success(.string(let raw)))):
-                let message = try? JSONDecoder().decode(User.State.WebSocket.Message.self, from: raw.data(using: .utf8)!)
+                let message = try! JSONDecoder().decode(User.State.WebSocket.Message.self, from: raw.data(using: .utf8)!)
                 switch message {
-                case .userState(let userState):
-                    if userState.call == nil {
-                        state.call = nil
-                        return .run { send in
-                            await webRTCClient.close()
-                            await cameraClient.stop()
-                            
-                            // TODO - audioClient
-                        }
+                case .pong:
+                    return .none
+                    
+                case .userState(let userState) where userState.call == nil:
+                    state.call = nil
+                    return .run { send in
+                        await webRTCClient.close()
+                        await cameraClient.stop()
+                        
+                        // TODO - audioClient
                     }
                     
+                case .userState(let userState):
                     state.call = state.call ?? .init(participants: [])
                     
-                    let hostParticipants = userState.call?.participants.filter { $0.role == .host } ?? []
-                    let updatedParticipants = hostParticipants.map { newParticipant in
-                        newParticipant.toParticipantState(existing: state.call?.participants[id: newParticipant.id])
+                    let newParticipants = (userState.call?.participants ?? []).filter {
+                        state.call?.participants[id: $0.id] == nil
+                    }.map { participant in
+                        Participant.State(
+                            id: participant.id,
+                            role: .init(rawValue: participant.role.rawValue)!,
+                            state: .init(rawValue: participant.state.rawValue)!,
+                            sessionId: participant.transceiverSessionId,
+                            tracks: .init(uniqueElements: participant.tracks.compactMap { track in
+                                guard let id = track.id else { return nil }
+                                
+                                return .init(
+                                    id: String(id.split(separator: "/")[1]),
+                                    state: .init(rawValue: track.state.rawValue)!,
+                                    pullState: .notPulled,
+                                    pushState: .pushed,
+                                    type: .init(rawValue: track.type.rawValue)!
+                                )
+                            })
+                        )
                     }
                     
-                    state.call?.participants = .init(uniqueElements: updatedParticipants)
+                    state.call?.participants.append(contentsOf: newParticipants)
                     
-                    return .merge((state.call?.participants ?? []).filter { $0.tracks.contains { $0.state == .notPulled } }.map {
-                        .send(.call(.participants(.element(id: $0.id, action: .pullTracks))))
-                    })
-
-                default:
-                    break
+                    let existingParticipants = (userState.call?.participants ?? []).filter { participant in
+                        state.call?.participants[id: participant.id] != nil
+                    }
+                    
+                    return .merge(
+                        .merge(newParticipants.map { .send(.call(.participants(.element(id: $0.id, action: .`init`)))) }),
+                        .merge(existingParticipants.map { .send(.call(.participants(.element(id: $0.id, action: .update($0))))) })
+                    )
+                    
+                case .unknown:
+                    fatalError("Unknown webSocket message received")
                 }
                 
                 return .none
@@ -137,7 +171,7 @@ public struct User {
             }
         }
         .ifLet(\.call, action: \.call) {
-            Call()._printChanges()
+            Call()
         }
     }
 }
@@ -145,8 +179,8 @@ public struct User {
 public extension User.State.WebSocket {
     enum Message: Decodable {
         public struct UserState: Decodable {
-            struct Call: Decodable {
-                struct Participant: Decodable {
+            public struct Call: Decodable {
+                public struct Participant: Decodable {
                     public enum State: String, Decodable {
                         case none
                         case declined
@@ -158,18 +192,24 @@ public extension User.State.WebSocket {
                         case user
                     }
                     
-                    public struct Tracks: Decodable {
-                        let audioEnabled: Bool?
-                        let videoEnabled: Bool?
-                        let screenShareEnabled: Bool?
-                        let video: String?
-                        let audio: String?
+                    public struct Track: Decodable, Equatable {
+                        public enum State: String, Decodable {
+                            case active, requested, inactive
+                        }
+                        
+                        public enum TrackType: String, Decodable {
+                            case audio, video, screenShare
+                        }
+                        
+                        public let state: State
+                        public let id: String?
+                        public let type: TrackType
                     }
 
                     let id: String
                     let state: State
                     let role: Role
-                    let tracks: Tracks
+                    let tracks: [Track]
                     let transceiverSessionId: String?
                 }
                 let participants: [Participant]
@@ -207,27 +247,6 @@ public extension User.State.WebSocket {
             default:
                 self = .unknown
             }
-        }
-    }
-}
-
-extension User.State.WebSocket.Message.UserState.Call.Participant {
-    func toParticipantState(existing: Participant.State?) -> Participant.State {
-        if var updated = existing {
-            updated.state = .init(rawValue: state.rawValue)!
-            updated.sessionId = transceiverSessionId
-            updated.updateTracks(from: tracks)
-            return updated
-        } else {
-            var newParticipant = Participant.State(
-                id: id,
-                role: .init(rawValue: role.rawValue)!,
-                state: .init(rawValue: state.rawValue)!,
-                sessionId: transceiverSessionId,
-                tracks: .init()
-            )
-            newParticipant.updateTracks(from: tracks)
-            return newParticipant
         }
     }
 }
