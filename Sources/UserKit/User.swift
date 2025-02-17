@@ -125,7 +125,16 @@ public struct User {
                     }
                     
                 case .userState(let userState):
-                    state.call = state.call ?? .init(participants: [])
+                    state.call = state.call ?? .init(alert: AlertState {
+                        TextState("Luke Longworth would like to start a call")
+                    } actions: {
+                        ButtonState(action: .accept) {
+                            TextState("Accept")
+                        }
+                        ButtonState(action: .decline) {
+                            TextState("Decline")
+                        }
+                    }, participants: [])
                     
                     let newParticipants = (userState.call?.participants ?? []).filter {
                         state.call?.participants[id: $0.id] == nil
@@ -257,7 +266,7 @@ struct UserView: View {
     var body: some View {
         WithPerceptionTracking {
             if let store = store.scope(state: \.call, action: \.call) {
-                CallViewControllerRepresentable(store: store)
+                CallView(store: store)
             } else {
                 EmptyView()
             }

@@ -64,7 +64,7 @@ public class UserKit {
         }
                 
         self.store = Store.init(initialState: UserKitApp.State(config: .init(api: .init(key: apiKey)))) {
-            UserKitApp()._printChanges()
+            UserKitApp()
         }
     }
     
@@ -102,7 +102,7 @@ public class UserKit {
         let hostingViewController = CustomHostingController(rootView: rootView)
         
         hostingViewController.onDismiss = { [weak self] in
-//            self?.window?.isHidden = true
+            self?.window?.isHidden = true
             store.send(.dismiss)
         }
 
@@ -117,7 +117,7 @@ public class UserKit {
             }
 
             self.window?.makeKeyAndVisible()
-//            self.window?.isHidden = false
+            self.window?.isHidden = false
             
             if self.window?.rootViewController?.presentedViewController == nil {
                 self.window?.rootViewController?.present(hostingViewController, animated: true)

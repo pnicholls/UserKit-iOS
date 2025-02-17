@@ -108,6 +108,8 @@ public struct Track {
                 case .screenShare:
                     return .merge(
                         .run { send in
+                            try await Task.sleep(for: .seconds(2))
+
                             do {
                                 let task = await screenRecorderClient.start()
                                 for try await buffer in task {

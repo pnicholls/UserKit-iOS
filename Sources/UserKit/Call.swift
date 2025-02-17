@@ -22,14 +22,22 @@ public struct Call {
     
     @ObservableState
     public struct State: Equatable {
+        @Presents var alert: AlertState<Action.Alert>?
         var destination: Destination.State = .requested(.init())
         var isPictureInPictureActive: Bool = false
+        var pictureInPicture: PictureInPicture.State?
         var participants: IdentifiedArrayOf<Participant.State>
         var sessionId: String? = nil
         var videoTrack: RTCVideoTrack?
     }
     
     public enum Action {
+        @CasePathable
+        public enum Alert {
+            case accept
+            case decline
+        }
+        
         public enum ApiClientAction {
             case postSessionResponse(Result<APIClient.PostSessionResponse, any Error>)
             case pullTracksResponse(Result<APIClient.PullTracksResponse, any Error>)
@@ -47,11 +55,14 @@ public struct Call {
             case push
         }
         
+        case alert(PresentationAction<Alert>)
+        case alertButtonTapped
         case apiClient(ApiClientAction)
         case appeared
         case destination(Destination.Action)
         case participants(IdentifiedActionOf<Participant>)
-        case pictureInPicture(PictureInPictureAction)
+        case pictureInPicture(PictureInPicture.Action)
+//        case pictureInPicture(PictureInPictureAction)
         case webRTC(WebRTC)
     }
     
@@ -66,6 +77,31 @@ public struct Call {
         }
         Reduce { state, action in
             switch action {
+            case .alert(.presented(.accept)):
+                state.pictureInPicture = .init()
+                
+                switch state.sessionId {
+                case .some:
+                    return .concatenate(
+                        .run { send in
+                            await webRTCClient.configure()
+                        },
+                        .send(.webRTC(.push))
+                    )
+                default:
+                    return .none
+                }
+                
+            case .alert(.presented(.decline)):
+                return .none
+                
+            case .alert(.dismiss):
+                state.alert = nil
+                return .none
+                
+            case .alertButtonTapped:
+                return .none
+                
             case .apiClient(.pullTracksResponse(.failure(_))):
                 return .none
                 
@@ -237,6 +273,7 @@ public struct Call {
                 
                 switch track.type {
                 case .screenShare:
+                    state.pictureInPicture = nil
                     state.isPictureInPictureActive = false
                 default:
                     break
@@ -327,17 +364,25 @@ public struct Call {
             case .participants:
                 return .none
                 
-            case .pictureInPicture(.start):
-                state.isPictureInPictureActive = true
+                
+            case .pictureInPicture(.started):
+                state.pictureInPicture = nil
                 return .none
                 
-            case .pictureInPicture(.stop):
-                state.isPictureInPictureActive = false
+            case .pictureInPicture:
                 return .none
-
-            case .pictureInPicture(.restore):
-                return .none
-            
+                
+//            case .pictureInPicture(.start):
+//                state.isPictureInPictureActive = true
+//                return .none
+//                
+//            case .pictureInPicture(.stop):
+//                state.isPictureInPictureActive = false
+//                return .none
+//
+//            case .pictureInPicture(.restore):
+//                return .none
+//            
             case .webRTC(.push):
                 guard let sessionId = state.sessionId else {
                     assertionFailure("Session ID must be set")
@@ -375,168 +420,28 @@ public struct Call {
         .forEach(\.participants, action: \.participants) {
             Participant()
         }
+        .ifLet(\.pictureInPicture, action: \.pictureInPicture) {
+            PictureInPicture()
+        }
     }
 }
 
 extension Call.Destination.State: Equatable {}
 
-final class CallViewController: UIViewController {
+struct CallView: View {
+    @Perception.Bindable var store: StoreOf<Call>
     
-    // MARK: - Properties
-
-    private let store: StoreOf<Call>
-    
-    private lazy var pictureInPictureVideoCallViewController: PictureInPictureVideoCallViewController = {
-        let pictureInPictureVideoCallViewController = PictureInPictureVideoCallViewController()
-        return pictureInPictureVideoCallViewController
-    }()
-
-    private lazy var pictureInPictureControllerContentSource: AVPictureInPictureController.ContentSource = {
-        let pictureInPictureControllerContentSource = AVPictureInPictureController.ContentSource(
-            activeVideoCallSourceView: hostingViewController.view,
-            contentViewController: pictureInPictureVideoCallViewController
-        )
-        return pictureInPictureControllerContentSource
-    }()
-    
-    private var pictureInPictureController: AVPictureInPictureController?
-    
-    private lazy var hostingViewController: ContainerHostingController = {
-        let hostingViewController = ContainerHostingController(rootView: EmptyView())
-        hostingViewController.view.translatesAutoresizingMaskIntoConstraints = false
-        return hostingViewController
-    }()
-        
-    // MARK: - Functions
-    
-    init(store: StoreOf<Call>) {
-        self.store = store
-        
-        super.init(nibName: nil, bundle: nil)
-    }
-    
-    required init?(coder: NSCoder) {
-      fatalError("init(coder:) has not been implemented")
-    }
-    
-    override func viewDidLoad() {
-        super.viewDidLoad()
-    
-//        pictureInPictureController = AVPictureInPictureController(contentSource: pictureInPictureControllerContentSource)
-//        pictureInPictureController?.canStartPictureInPictureAutomaticallyFromInline = false
-//        pictureInPictureController?.delegate = self
-        
-        view.addSubview(hostingViewController.view)
+    var body: some View {
+        WithPerceptionTracking {
+            VStack {
+                Spacer()
                 
-        NSLayoutConstraint.activate([
-            hostingViewController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            hostingViewController.view.topAnchor.constraint(equalTo: view.topAnchor),
-            hostingViewController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            hostingViewController.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)
-        ])
-        
-        observe { [weak self] in
-            guard let self else { return }
-            
-//            if store.isPictureInPictureActive {
-//                pictureInPictureController?.startPictureInPicture()
-//            } else {
-//                pictureInPictureController?.stopPictureInPicture()
-//            }
-            
-            if let track = store.videoTrack {
-                track.add(pictureInPictureVideoCallViewController.videoView)
+                if let store = store.scope(state: \.pictureInPicture, action: \.pictureInPicture) {
+                    PictureInPictureViewControllerRepresentable(store: store)
+                }
             }
-            
-            switch store.scope(state: \.destination, action: \.destination).case {
-            case .active(let store):
-                let view = ActiveView(store: store)
-                hostingViewController.updateView(view)
-                
-            case .requested(let store):
-                let view = RequestedView(store: store)
-                hostingViewController.updateView(view)
-            }
+            .alert($store.scope(state: \.alert, action: \.alert))
         }
-    }
-    
-    override func viewWillAppear(_ animated: Bool) {
-        super.viewWillAppear(animated)
-        
-        store.send(.appeared)
-    }
-}
-
-extension CallViewController: AVPictureInPictureControllerDelegate {
-    func pictureInPictureControllerWillStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
-        store.send(.pictureInPicture(.start))
-    }
-    
-    func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
-        store.send(.pictureInPicture(.stop))
-    }
-    
-    func pictureInPictureControllerWillStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
-        store.send(.pictureInPicture(.stop))
-    }
-        
-    func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController) async -> Bool {
-        @MainActor func updateStore() async {
-            store.send(.pictureInPicture(.restore))
-        }
-        
-        await updateStore()
-        return true
-    }
-}
-
-struct CallViewControllerRepresentable: UIViewControllerRepresentable {
-    let store: StoreOf<Call>
-    
-    func makeUIViewController(context: Context) -> CallViewController {
-        CallViewController(store: store)
-    }
-    
-    func updateUIViewController(_ uiViewController: CallViewController, context: Context) {
-        // Update controller if needed
-    }
-}
-
-class ContainerHostingController: UIHostingController<AnyView> {
-    func updateView<V: View>(_ view: V) {
-        self.rootView = AnyView(view)
-    }
-    
-    init<V: View>(rootView: V) {
-        super.init(rootView: AnyView(rootView))
-    }
-    
-    @MainActor required dynamic init?(coder aDecoder: NSCoder) {
-        super.init(coder: aDecoder)
-    }
-}
-
-final class PictureInPictureVideoCallViewController: AVPictureInPictureVideoCallViewController {
-    lazy var videoView: RTCMTLVideoView = {
-        let videoView = RTCMTLVideoView()
-        videoView.translatesAutoresizingMaskIntoConstraints = false
-        return videoView
-    }()
-    
-    convenience init() {
-        self.init(nibName: nil, bundle: nil)
-    }
-        
-    override func viewDidLoad() {
-        super.viewDidLoad()
-                
-        view.addSubview(videoView)
-        
-        NSLayoutConstraint.activate([
-            videoView.topAnchor.constraint(equalTo: view.topAnchor),
-            videoView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            videoView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            videoView.trailingAnchor.constraint(equalTo: view.trailingAnchor)
-        ])
+        .onAppear { store.send(.appeared) }
     }
 }
