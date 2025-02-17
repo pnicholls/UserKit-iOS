@@ -183,6 +183,9 @@ public struct Call {
             case .apiClient(.postSessionResponse(.success(let response))):
                 state.sessionId = response.sessionId
                 return .none
+                
+                // TODO: Use the user participants state to determine if the user has already joined
+                
 //                switch state.destination {
 //                case .active:
 //                    return .concatenate(
@@ -388,8 +391,6 @@ struct CallView: View {
                 
                 if let store = store.scope(state: \.pictureInPicture, action: \.pictureInPicture) {
                     PictureInPictureViewControllerRepresentable(store: store)
-                } else {
-                    EmptyView()
                 }
             }
             .alert($store.scope(state: \.alert, action: \.alert))

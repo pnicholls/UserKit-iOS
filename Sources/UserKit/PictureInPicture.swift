@@ -85,9 +85,7 @@ final class PictureInPictureViewController: UIViewController {
         
     override func viewDidLoad() {
         super.viewDidLoad()
-        
-        view.backgroundColor = .purple
-        
+                
         view.addSubview(hostingViewController.view)
                 
         NSLayoutConstraint.activate([
