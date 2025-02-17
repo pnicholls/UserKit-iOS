@@ -13,17 +13,10 @@ public struct Call {
     @Dependency(\.screenRecorderClient) var screenRecorderClient
     @Dependency(\.webRTCClient) var webRTCClient
     @Dependency(\.webSocketClient) var webSocketClient
-        
-    @Reducer
-    public enum Destination {
-        case active(Active)
-        case requested(Requested)
-    }
-    
+            
     @ObservableState
     public struct State: Equatable {
         @Presents var alert: AlertState<Action.Alert>?
-        var destination: Destination.State = .requested(.init())
         var pictureInPicture: PictureInPicture.State?
         var participants: IdentifiedArrayOf<Participant.State>
         var sessionId: String? = nil
@@ -52,21 +45,12 @@ public struct Call {
         case alert(PresentationAction<Alert>)
         case apiClient(ApiClientAction)
         case appeared
-        case destination(Destination.Action)
         case participants(IdentifiedActionOf<Participant>)
         case pictureInPicture(PictureInPicture.Action)
         case webRTC(WebRTC)
     }
     
     public var body: some ReducerOf<Self> {
-        Scope(state: \.destination, action: \.destination) {
-            Scope(state: \.active, action: \.active) {
-                Active()
-            }
-            Scope(state: \.requested, action: \.requested) {
-                Requested()
-            }
-        }
         Reduce { state, action in
             switch action {
             case .alert(.presented(.accept)):
@@ -86,10 +70,9 @@ public struct Call {
                 }
                 
             case .alert(.presented(.continue)):
-                // TODO Find the videoTrack
-                
+                let videoTrack = state.participants.flatMap { $0.tracks.compactMap { $0.receiver?.track } }.first as? RTCVideoTrack
                 state.alert = nil
-                state.pictureInPicture = .init(isActive: true)
+                state.pictureInPicture = .init(isActive: true, videoTrack: videoTrack)
                 return .none
                 
             case .alert(.presented(.decline)):
@@ -97,7 +80,10 @@ public struct Call {
                 
             case .alert(.presented(.end)):
                 state.alert = nil
-                return .none
+                return .run { send in
+                    await webRTCClient.close()
+                    await audioSessionClient.removeNotificationObservers()
+                }
                 
             case .alert(.dismiss):
                 state.alert = nil
@@ -196,17 +182,18 @@ public struct Call {
             
             case .apiClient(.postSessionResponse(.success(let response))):
                 state.sessionId = response.sessionId
-                switch state.destination {
-                case .active:
-                    return .concatenate(
-                        .run { send in
-                            await webRTCClient.configure()
-                        },
-                        .send(.webRTC(.push))
-                    )
-                default:
-                    return .none
-                }
+                return .none
+//                switch state.destination {
+//                case .active:
+//                    return .concatenate(
+//                        .run { send in
+//                            await webRTCClient.configure()
+//                        },
+//                        .send(.webRTC(.push))
+//                    )
+//                default:
+//                    return .none
+//                }
             
             case .apiClient(.renegotiateResponse(.failure(_))):
                 return .none
@@ -232,41 +219,7 @@ public struct Call {
                         try await apiClient.request(endpoint: .postSession(.init()), as: APIClient.PostSessionResponse.self)
                     })))
                 }
-                
-            case .destination(.active(.continue)):
-//                state.isPictureInPictureActive = true
-                return .none
-                
-            case .destination(.active(.end)):
-//                state.isPictureInPictureActive = false
-                state.destination = .requested(.init())
-                return .run { send in
-                    await webRTCClient.close()
-                    await audioSessionClient.removeNotificationObservers()
-                }
                                 
-            case .destination(.active):
-                return .none
-                
-            case .destination(.requested(.accept)):
-//                state.destination = .active(.init(video: state.videoTrack != nil ? .init(track: state.videoTrack!) : nil))
-//                state.isPictureInPictureActive = true
-                
-                switch state.sessionId {
-                case .some:
-                    return .concatenate(
-                        .run { send in
-                            await webRTCClient.configure()
-                        },
-                        .send(.webRTC(.push))
-                    )
-                default:
-                    return .none
-                }
-                                
-            case .destination(.requested(.decline)):
-                return .none
-                
             case .participants(.element(id: let participantId, action: .tracks(.element(id: let trackId, action: .request)))):
                 guard let track = state.participants[id: participantId]?.tracks[id: trackId] else {
                     return .none
@@ -355,16 +308,8 @@ public struct Call {
                 guard let track = state.participants[id: id]?.tracks[id: trackId], track.type == .video, let track = receiver.track as? RTCVideoTrack else {
                     return .none
                 }
+                
                 state.pictureInPicture?.videoTrack = track
-                
-                switch state.destination {
-                case .active(var activeState):
-                    activeState.video = .init(track: track)
-                    state.destination = .active(activeState)
-                default:
-                    break
-                }
-                
                 return .none
                                                 
             case .participants:
@@ -390,17 +335,6 @@ public struct Call {
             case .pictureInPicture:
                 return .none
                 
-//            case .pictureInPicture(.start):
-//                state.isPictureInPictureActive = true
-//                return .none
-//                
-//            case .pictureInPicture(.stop):
-//                state.isPictureInPictureActive = false
-//                return .none
-//
-//            case .pictureInPicture(.restore):
-//                return .none
-//            
             case .webRTC(.push):
                 guard let sessionId = state.sessionId else {
                     assertionFailure("Session ID must be set")
@@ -443,8 +377,6 @@ public struct Call {
         }
     }
 }
-
-extension Call.Destination.State: Equatable {}
 
 struct CallView: View {
     @Perception.Bindable var store: StoreOf<Call>
