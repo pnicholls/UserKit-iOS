@@ -9,18 +9,24 @@ public struct PictureInPicture {
     @ObservableState
     public struct State: Equatable {
         var isActive: Bool = false
+        var videoTrack: RTCVideoTrack?
     }
     
     public enum Action: Equatable {
-        case appeared
+        case dismiss
+        case restore
         case start
         case started
+        case stopped
     }
         
     public var body: some ReducerOf<Self> {
         Reduce { state, action in
             switch action {
-            case .appeared:
+            case .dismiss:
+                return .none
+                
+            case .restore:
                 return .none
                 
             case .start:
@@ -29,6 +35,10 @@ public struct PictureInPicture {
                 
             case .started:
                 return .none
+                
+            case .stopped:
+                return .none
+                                
             }
         }
     }
@@ -72,9 +82,11 @@ final class PictureInPictureViewController: UIViewController {
     required init?(coder: NSCoder) {
       fatalError("init(coder:) has not been implemented")
     }
-    
+        
     override func viewDidLoad() {
         super.viewDidLoad()
+        
+        view.backgroundColor = .purple
         
         view.addSubview(hostingViewController.view)
                 
@@ -89,24 +101,6 @@ final class PictureInPictureViewController: UIViewController {
         pictureInPictureController?.canStartPictureInPictureAutomaticallyFromInline = false
         pictureInPictureController?.delegate = self
         
-        // Create UIButton
-        let button = UIButton(type: .system)
-        
-        // Set button title
-        button.setTitle("Tap Me", for: .normal)
-        
-        // Set button appearance
-        button.backgroundColor = .systemBlue
-        button.setTitleColor(.white, for: .normal)
-        button.layer.cornerRadius = 10
-        button.frame = CGRect(x: 100, y: 200, width: 150, height: 50)
-        
-        // Add target action
-        button.addTarget(self, action: #selector(buttonTapped), for: .touchUpInside)
-        
-        // Add button to view
-        view.addSubview(button)
-        
         observe { [weak self] in
             guard let self else { return }
             
@@ -115,45 +109,42 @@ final class PictureInPictureViewController: UIViewController {
             } else {
                 pictureInPictureController?.stopPictureInPicture()
             }
+            
+            if let track = store.videoTrack {
+                track.add(pictureInPictureVideoCallViewController.videoView)
+            }
         }
     }
     
-    @objc private func buttonTapped() {
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        
+        // This is required
         store.send(.start)
-    }
-    
-    override func viewWillAppear(_ animated: Bool) {
-        super.viewWillAppear(animated)
-        
-        store.send(.appeared)
-    }
-    
-    override func viewWillDisappear(_ animated: Bool) {
-        super.viewWillDisappear(animated)
-        
-        pictureInPictureController?.stopPictureInPicture()
-    }
+    }    
 }
 
 extension PictureInPictureViewController: AVPictureInPictureControllerDelegate {
     func pictureInPictureControllerWillStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
-//        store.send(.started)
+        store.send(.started)
     }
     
     func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
-//        store.send(.pictureInPicture(.stop))
+        self.pictureInPictureController = nil
+        
+        store.send(.stopped)
     }
     
     func pictureInPictureControllerWillStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
-//        store.send(.pictureInPicture(.stop))
+        // NOP
     }
         
     func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController) async -> Bool {
-//        @MainActor func updateStore() async {
-//            store.send(.pictureInPicture(.restore))
-//        }
-//        
-//        await updateStore()
+        @MainActor func updateStore() async {
+            store.send(.restore)
+        }
+        
+        await updateStore()
         return true
     }
 }

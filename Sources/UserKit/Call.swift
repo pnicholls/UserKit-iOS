@@ -24,18 +24,18 @@ public struct Call {
     public struct State: Equatable {
         @Presents var alert: AlertState<Action.Alert>?
         var destination: Destination.State = .requested(.init())
-        var isPictureInPictureActive: Bool = false
         var pictureInPicture: PictureInPicture.State?
         var participants: IdentifiedArrayOf<Participant.State>
         var sessionId: String? = nil
-        var videoTrack: RTCVideoTrack?
     }
     
     public enum Action {
         @CasePathable
         public enum Alert {
             case accept
+            case `continue`
             case decline
+            case end
         }
         
         public enum ApiClientAction {
@@ -44,25 +44,17 @@ public struct Call {
             case pushTracksResponse(Result<APIClient.PushTracksResponse, any Error>)
             case renegotiateResponse(Result<APIClient.RenegotiateResponse, any Error>)
         }
-
-        public enum PictureInPictureAction: Equatable {
-            case start
-            case stop
-            case restore
-        }
         
         public enum WebRTC: Equatable {
             case push
         }
         
         case alert(PresentationAction<Alert>)
-        case alertButtonTapped
         case apiClient(ApiClientAction)
         case appeared
         case destination(Destination.Action)
         case participants(IdentifiedActionOf<Participant>)
         case pictureInPicture(PictureInPicture.Action)
-//        case pictureInPicture(PictureInPictureAction)
         case webRTC(WebRTC)
     }
     
@@ -78,6 +70,7 @@ public struct Call {
         Reduce { state, action in
             switch action {
             case .alert(.presented(.accept)):
+                state.alert = nil
                 state.pictureInPicture = .init()
                 
                 switch state.sessionId {
@@ -92,16 +85,24 @@ public struct Call {
                     return .none
                 }
                 
+            case .alert(.presented(.continue)):
+                // TODO Find the videoTrack
+                
+                state.alert = nil
+                state.pictureInPicture = .init(isActive: true)
+                return .none
+                
             case .alert(.presented(.decline)):
+                return .none
+                
+            case .alert(.presented(.end)):
+                state.alert = nil
                 return .none
                 
             case .alert(.dismiss):
                 state.alert = nil
                 return .none
-                
-            case .alertButtonTapped:
-                return .none
-                
+                                
             case .apiClient(.pullTracksResponse(.failure(_))):
                 return .none
                 
@@ -233,11 +234,11 @@ public struct Call {
                 }
                 
             case .destination(.active(.continue)):
-                state.isPictureInPictureActive = true
+//                state.isPictureInPictureActive = true
                 return .none
                 
             case .destination(.active(.end)):
-                state.isPictureInPictureActive = false
+//                state.isPictureInPictureActive = false
                 state.destination = .requested(.init())
                 return .run { send in
                     await webRTCClient.close()
@@ -248,7 +249,7 @@ public struct Call {
                 return .none
                 
             case .destination(.requested(.accept)):
-                state.destination = .active(.init(video: state.videoTrack != nil ? .init(track: state.videoTrack!) : nil))
+//                state.destination = .active(.init(video: state.videoTrack != nil ? .init(track: state.videoTrack!) : nil))
 //                state.isPictureInPictureActive = true
                 
                 switch state.sessionId {
@@ -273,8 +274,13 @@ public struct Call {
                 
                 switch track.type {
                 case .screenShare:
-                    state.pictureInPicture = nil
-                    state.isPictureInPictureActive = false
+                    state.pictureInPicture?.isActive = false
+                    
+                    return .concatenate(
+                        .run { send in try await Task.sleep(for: .seconds(1)) },
+                        .send(.participants(.element(id: participantId, action: .tracks(.element(id: trackId, action: .start)))))
+                    )
+                    
                 default:
                     break
                 }
@@ -349,7 +355,7 @@ public struct Call {
                 guard let track = state.participants[id: id]?.tracks[id: trackId], track.type == .video, let track = receiver.track as? RTCVideoTrack else {
                     return .none
                 }
-                state.videoTrack = track
+                state.pictureInPicture?.videoTrack = track
                 
                 switch state.destination {
                 case .active(var activeState):
@@ -363,10 +369,22 @@ public struct Call {
                                                 
             case .participants:
                 return .none
-                
+                            
+            case .pictureInPicture(.restore):
+                state.pictureInPicture = nil
+                state.alert = AlertState {
+                    TextState("You are still in a call with Luke Longworth")
+                } actions: {
+                    ButtonState(action: .continue) {
+                        TextState("Continue")
+                    }
+                    ButtonState(action: .end) {
+                        TextState("End")
+                    }
+                }
+                return .none
                 
             case .pictureInPicture(.started):
-                state.pictureInPicture = nil
                 return .none
                 
             case .pictureInPicture:
@@ -438,6 +456,8 @@ struct CallView: View {
                 
                 if let store = store.scope(state: \.pictureInPicture, action: \.pictureInPicture) {
                     PictureInPictureViewControllerRepresentable(store: store)
+                } else {
+                    EmptyView()
                 }
             }
             .alert($store.scope(state: \.alert, action: \.alert))

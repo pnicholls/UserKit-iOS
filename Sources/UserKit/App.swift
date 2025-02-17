@@ -69,10 +69,10 @@ public struct UserKitApp {
                 state.isPresented = false
                 return .none
 
-//            case .user(.call(.pictureInPicture(.start))):
+//            case .user(.call(.pictureInPicture(.started))):
 //                state.isPresented = false
 //                return .none
-//
+
 //            case .user(.call(.pictureInPicture(.stop))):
 //                state.isPresented = true
 //                return .none

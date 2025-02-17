@@ -64,7 +64,7 @@ public class UserKit {
         }
                 
         self.store = Store.init(initialState: UserKitApp.State(config: .init(api: .init(key: apiKey)))) {
-            UserKitApp()
+            UserKitApp()._printChanges()
         }
     }
     
@@ -77,18 +77,16 @@ public class UserKit {
             print("No UIWindowScene found")
             return
         }
+                
+        window = UIWindow(windowScene: windowScene)
+                        
+        let rootViewController = UIViewController()
+        rootViewController.view.backgroundColor = .clear
         
-        window = windowScene.windows.first
-        
-//        window = UIWindow(windowScene: windowScene)
-//                        
-//        let rootViewController = UIViewController()
-//        rootViewController.view.backgroundColor = .clear
-//        
-//        window?.rootViewController = rootViewController
-//
-//        window?.windowLevel = .statusBar
-//        window?.isHidden = true
+        window?.rootViewController = rootViewController
+
+        window?.windowLevel = .statusBar
+        window?.isHidden = true
         
         store?.send(.configured)
     }
@@ -152,20 +150,6 @@ class CustomHostingController<Content>: UIHostingController<Content> where Conte
 
     var onDismiss: (() -> Void)?
     
-    var presentationDelegate = PresentationControllerDelegate()
-    
-    override func viewWillAppear(_ animated: Bool) {
-        super.viewWillAppear(animated)
-                
-        presentationController?.delegate = presentationDelegate
-        
-        if let presentationController = presentationController as? UISheetPresentationController {
-            presentationController.detents = [
-                .medium()
-            ]
-        }
-    }
-    
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
 
@@ -173,11 +157,5 @@ class CustomHostingController<Content>: UIHostingController<Content> where Conte
         if isBeingDismissed {
             onDismiss?() // Call the callback if dismissed
         }
-    }
-}
-
-class PresentationControllerDelegate: NSObject, UIAdaptivePresentationControllerDelegate {
-    func presentationControllerShouldDismiss(_ presentationController: UIPresentationController) -> Bool {
-        return false
     }
 }

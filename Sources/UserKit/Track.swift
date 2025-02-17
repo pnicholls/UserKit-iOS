@@ -66,6 +66,7 @@ public struct Track {
         case request
         case requestAccepted
         case requestRejected
+        case start
         case update(User.State.WebSocket.Message.UserState.Call.Participant.Track)
     }
     
@@ -106,25 +107,7 @@ public struct Track {
                     break
                     
                 case .screenShare:
-                    return .merge(
-                        .run { send in
-                            try await Task.sleep(for: .seconds(2))
-
-                            do {
-                                let task = await screenRecorderClient.start()
-                                for try await buffer in task {
-                                    await webRTCClient.handleScreenShareSourceBuffer(buffer.sampleBuffer)
-                                }
-                            } catch {
-                                // TODO: - Handle reject permission
-                            }
-                        },
-                        .run { send in
-                            // TODO - This won't work
-                            try await Task.sleep(for: .seconds(3))
-                            await send(.requestAccepted)
-                        }
-                    )
+                    break
                     
                 case .video:
                     return .run { send in
@@ -133,6 +116,27 @@ public struct Track {
                     }
                 }
                 return .none
+                
+            case .start:
+                return .merge(
+                    .run { send in
+//                        try await Task.sleep(for: .seconds(2))
+
+                        do {
+                            let task = await screenRecorderClient.start()
+                            for try await buffer in task {
+                                await webRTCClient.handleScreenShareSourceBuffer(buffer.sampleBuffer)
+                            }
+                        } catch {
+                            // TODO: - Handle reject permission
+                        }
+                    },
+                    .run { send in
+                        // TODO - This won't work
+                        try await Task.sleep(for: .seconds(3))
+                        await send(.requestAccepted)
+                    }
+                )
                 
             case .update(let track):
                 state.state = .init(rawValue: track.state.rawValue)!
