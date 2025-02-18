@@ -77,9 +77,17 @@ public class UserKit {
             print("No UIWindowScene found")
             return
         }
-
-        window = windowScene.windows.first
                 
+        window = UIWindow(windowScene: windowScene)
+                        
+        let rootViewController = UIViewController()
+        rootViewController.view.backgroundColor = .clear
+        
+        window?.rootViewController = rootViewController
+
+        window?.windowLevel = .statusBar
+        window?.isHidden = true
+        
         store?.send(.configured)
     }
     
@@ -90,13 +98,31 @@ public class UserKit {
 
         let rootView = RootView(store: store)
         let hostingViewController = CustomHostingController(rootView: rootView)
-        
-        window?.rootViewController?.addChild(hostingViewController)
+        hostingViewController.view.backgroundColor = .clear
         hostingViewController.view.frame = .zero
-        hostingViewController.view.isHidden = true
-        hostingViewController.view.isUserInteractionEnabled = false
-        window?.rootViewController?.view.addSubview(hostingViewController.view)
-        hostingViewController.didMove(toParent: window?.rootViewController)
+                
+        hostingViewController.onDismiss = { [weak self] in
+            self?.window?.isHidden = true
+            store.send(.dismiss)
+        }
+
+        self.store?.publisher.isPresented.removeDuplicates().sink(receiveValue: { [weak self] present in
+            guard let self = self else { return }
+                
+            if !present {
+                if hostingViewController.presentingViewController != nil {
+                    hostingViewController.dismiss(animated: false)
+                }
+                return
+            }
+
+            self.window?.makeKeyAndVisible()
+            self.window?.isHidden = false
+            
+            if self.window?.rootViewController?.presentedViewController == nil {
+                self.window?.rootViewController?.present(hostingViewController, animated: false)
+            }
+        }).store(in: &cancellables)
     }
 }
 
