@@ -244,6 +244,9 @@ public struct Call {
                 return .none
                 
             case .participants(.element(id: let participantId, action: .tracks(.element(id: let trackId, action: .requestAccepted)))):
+                let videoTrack = state.participants.flatMap { $0.tracks.compactMap { $0.receiver?.track } }.first as? RTCVideoTrack
+                state.pictureInPicture = .init(isActive: true, videoTrack: videoTrack)
+
                 return .run { [state] send in
                     let tracks: [[String: Any]] = await webRTCClient.localTransceivers().map { type, transceiver in
                         let transceiverTrackId = transceiver.sender.track!.trackId
@@ -320,16 +323,16 @@ public struct Call {
                             
             case .pictureInPicture(.restore):
                 state.pictureInPicture = nil
-                state.alert = AlertState {
-                    TextState("You are still in a call with Luke Longworth")
-                } actions: {
-                    ButtonState(action: .continue) {
-                        TextState("Continue")
-                    }
-                    ButtonState(action: .end) {
-                        TextState("End")
-                    }
-                }
+//                state.alert = AlertState {
+//                    TextState("You are still in a call with Luke Longworth")
+//                } actions: {
+//                    ButtonState(action: .continue) {
+//                        TextState("Continue")
+//                    }
+//                    ButtonState(action: .end) {
+//                        TextState("End")
+//                    }
+//                }
                 return .none
                 
             case .pictureInPicture(.started):
