@@ -92,6 +92,7 @@ public class UserKit {
         let hostingViewController = CustomHostingController(rootView: rootView)
         
         window?.rootViewController?.addChild(hostingViewController)
+        hostingViewController.view.frame = window?.rootViewController?.view.frame ?? .zero
         window?.rootViewController?.view.addSubview(hostingViewController.view)
         hostingViewController.didMove(toParent: window?.rootViewController)
     }
