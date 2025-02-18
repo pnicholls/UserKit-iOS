@@ -77,12 +77,14 @@ public class UserKit {
             print("No UIWindowScene found")
             return
         }
-                
-        window = windowScene.windows.first
+                        
+        window = UIWindow(windowScene: windowScene)
+        window?.windowLevel = .statusBar
+        window?.isHidden = true
         
         store?.send(.configured)
     }
-    
+        
     private func configureRootViewController() {
         guard let store = store else {
             return
@@ -90,11 +92,22 @@ public class UserKit {
 
         let rootView = RootView(store: store)
         let hostingViewController = CustomHostingController(rootView: rootView)
+        hostingViewController.view.backgroundColor = .clear
+        hostingViewController.view.isUserInteractionEnabled = false
         
-        window?.rootViewController?.addChild(hostingViewController)
-        hostingViewController.view.frame = window?.rootViewController?.view.frame ?? .zero
-        window?.rootViewController?.view.addSubview(hostingViewController.view)
-        hostingViewController.didMove(toParent: window?.rootViewController)
+        window?.rootViewController = hostingViewController
+        
+        self.store?.publisher.isPresented.removeDuplicates().sink(receiveValue: { [weak self] present in
+            guard let self = self else { return }
+                
+            if !present {
+                self.window?.isHidden = true
+                return
+            }
+
+            self.window?.makeKeyAndVisible()
+            self.window?.isHidden = false
+        }).store(in: &cancellables)        
     }
 }
 
