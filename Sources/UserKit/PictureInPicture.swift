@@ -57,20 +57,14 @@ final class PictureInPictureViewController: UIViewController {
 
     private lazy var pictureInPictureControllerContentSource: AVPictureInPictureController.ContentSource = {
         let pictureInPictureControllerContentSource = AVPictureInPictureController.ContentSource(
-            activeVideoCallSourceView: hostingViewController.view,
+            activeVideoCallSourceView: view,
             contentViewController: pictureInPictureVideoCallViewController
         )
         return pictureInPictureControllerContentSource
     }()
     
     private var pictureInPictureController: AVPictureInPictureController?
-    
-    private lazy var hostingViewController: ContainerHostingController = {
-        let hostingViewController = ContainerHostingController(rootView: EmptyView())
-        hostingViewController.view.translatesAutoresizingMaskIntoConstraints = false
-        return hostingViewController
-    }()
-        
+            
     // MARK: - Functions
     
     init(store: StoreOf<PictureInPicture>) {
@@ -85,16 +79,7 @@ final class PictureInPictureViewController: UIViewController {
         
     override func viewDidLoad() {
         super.viewDidLoad()
-                
-        view.addSubview(hostingViewController.view)
-                
-        NSLayoutConstraint.activate([
-            hostingViewController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            hostingViewController.view.topAnchor.constraint(equalTo: view.topAnchor),
-            hostingViewController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            hostingViewController.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)
-        ])
-        
+                        
         pictureInPictureController = AVPictureInPictureController(contentSource: pictureInPictureControllerContentSource)
         pictureInPictureController?.canStartPictureInPictureAutomaticallyFromInline = false
         pictureInPictureController?.delegate = self
