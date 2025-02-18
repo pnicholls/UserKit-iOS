@@ -88,7 +88,7 @@ public struct UserKitApp {
 //        .onChange(of: { $0.user?.call }) { oldValue, newValue in
 //            Reduce { state, action in
 //                switch (newValue) {
-//                case .some(let callState) where callState.isPictureInPictureActive:
+//                case .some(let callState) where callState.pi:
 //                    state.isPresented = false
 //                case .some(let callState) where callState.isPictureInPictureActive == false:
 //                    state.isPresented = true

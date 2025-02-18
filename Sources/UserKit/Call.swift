@@ -401,8 +401,6 @@ struct CallView: View {
     var body: some View {
         WithPerceptionTracking {
             VStack {
-                Spacer()
-                
                 if let store = store.scope(state: \.pictureInPicture, action: \.pictureInPicture) {
                     PictureInPictureViewControllerRepresentable(store: store)
                 }
