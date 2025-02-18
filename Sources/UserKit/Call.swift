@@ -244,6 +244,8 @@ public struct Call {
                 return .none
                 
             case .participants(.element(id: let participantId, action: .tracks(.element(id: let trackId, action: .requestAccepted)))):
+                state.participants[id: participantId]?.tracks[id: trackId]?.state = .active
+                
                 let videoTrack = state.participants.flatMap { $0.tracks.compactMap { $0.receiver?.track } }.first as? RTCVideoTrack
                 state.pictureInPicture = .init(isActive: true, videoTrack: videoTrack)
 
@@ -323,16 +325,25 @@ public struct Call {
                             
             case .pictureInPicture(.restore):
                 state.pictureInPicture = nil
-//                state.alert = AlertState {
-//                    TextState("You are still in a call with Luke Longworth")
-//                } actions: {
-//                    ButtonState(action: .continue) {
-//                        TextState("Continue")
-//                    }
-//                    ButtonState(action: .end) {
-//                        TextState("End")
-//                    }
-//                }
+                
+                guard let participant = state.participants.first(where: { $0.role == .user }) else {
+                    return .none
+                }
+                
+                if participant.tracks.contains(where: { $0.type == .screenShare && $0.state == .requested }) {
+                    return .none
+                }
+                
+                state.alert = AlertState {
+                    TextState("You are still in a call with Luke Longworth")
+                } actions: {
+                    ButtonState(action: .continue) {
+                        TextState("Continue")
+                    }
+                    ButtonState(action: .end) {
+                        TextState("End")
+                    }
+                }
                 return .none
                 
             case .pictureInPicture(.started):
