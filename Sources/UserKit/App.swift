@@ -77,6 +77,8 @@ public struct UserKitApp {
                 switch (newValue) {
                 case .some(let callState) where callState.alert != nil:
                     state.isPresented = true
+                case .some(let callState) where callState.pictureInPicture?.state == .starting:
+                    state.isPresented = true
                 default:
                     state.isPresented = false
                 }

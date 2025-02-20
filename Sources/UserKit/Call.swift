@@ -71,8 +71,8 @@ public struct Call {
                 
             case .alert(.presented(.continue)):
                 let videoTrack = state.participants.flatMap { $0.tracks.compactMap { $0.receiver?.track } }.first as? RTCVideoTrack
+                state.pictureInPicture = .init(state: .starting, videoTrack: videoTrack)
                 state.alert = nil
-                state.pictureInPicture = .init(isActive: true, videoTrack: videoTrack)
                 return .none
                 
             case .alert(.presented(.decline)):
@@ -230,7 +230,7 @@ public struct Call {
                 
                 switch track.type {
                 case .screenShare:
-                    state.pictureInPicture?.isActive = false
+                    state.pictureInPicture?.state = .stopped
                     
                     return .concatenate(
                         .run { send in try await Task.sleep(for: .seconds(1)) },
@@ -247,7 +247,7 @@ public struct Call {
                 state.participants[id: participantId]?.tracks[id: trackId]?.state = .active
                 
                 let videoTrack = state.participants.flatMap { $0.tracks.compactMap { $0.receiver?.track } }.first as? RTCVideoTrack
-                state.pictureInPicture = .init(isActive: true, videoTrack: videoTrack)
+                state.pictureInPicture = .init(state: .starting, videoTrack: videoTrack)
 
                 return .run { [state] send in
                     let tracks: [[String: Any]] = await webRTCClient.localTransceivers().map { type, transceiver in

@@ -8,12 +8,17 @@ import WebRTC
 public struct PictureInPicture {
     @ObservableState
     public struct State: Equatable {
-        var isActive: Bool = false
+        enum State: Equatable {
+            case starting
+            case started
+            case stopped
+        }
+        
+        var state: State = .stopped
         var videoTrack: RTCVideoTrack?
     }
     
     public enum Action: Equatable {
-        case dismiss
         case restore
         case start
         case started
@@ -23,22 +28,20 @@ public struct PictureInPicture {
     public var body: some ReducerOf<Self> {
         Reduce { state, action in
             switch action {
-            case .dismiss:
-                return .none
-                
             case .restore:
                 return .none
                 
             case .start:
-                state.isActive = true
+                state.state = .starting
                 return .none
                 
             case .started:
+                state.state = .started
                 return .none
                 
             case .stopped:
+                state.state = .stopped
                 return .none
-                                
             }
         }
     }
@@ -87,12 +90,17 @@ final class PictureInPictureViewController: UIViewController {
         observe { [weak self] in
             guard let self else { return }
             
-            if store.isActive {
+            switch store.state.state {
+            case .starting where !(pictureInPictureController?.isPictureInPictureActive ?? false):
                 pictureInPictureController?.startPictureInPicture()
-            } else {
+            case .started where !(pictureInPictureController?.isPictureInPictureActive ?? false):
+                pictureInPictureController?.startPictureInPicture()
+            case .stopped:
                 pictureInPictureController?.stopPictureInPicture()
+            default:
+                break
             }
-            
+                        
             if let track = store.videoTrack {
                 track.add(pictureInPictureVideoCallViewController.videoView)
             }
