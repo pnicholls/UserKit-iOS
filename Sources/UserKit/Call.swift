@@ -244,10 +244,18 @@ public struct Call {
                 return .none
                 
             case .participants(.element(id: let participantId, action: .tracks(.element(id: let trackId, action: .requestAccepted)))):
+                guard let track = state.participants[id: participantId]?.tracks[id: trackId] else {
+                    return .none
+                }
                 state.participants[id: participantId]?.tracks[id: trackId]?.state = .active
                 
-                let videoTrack = state.participants.flatMap { $0.tracks.compactMap { $0.receiver?.track } }.first as? RTCVideoTrack
-                state.pictureInPicture = .init(state: .starting, videoTrack: videoTrack)
+                switch track.type {
+                case .screenShare:
+                    let videoTrack = state.participants.flatMap { $0.tracks.compactMap { $0.receiver?.track } }.first as? RTCVideoTrack
+                    state.pictureInPicture = .init(state: .starting, videoTrack: videoTrack)
+                default:
+                    break
+                }
 
                 return .run { [state] send in
                     let tracks: [[String: Any]] = await webRTCClient.localTransceivers().map { type, transceiver in
