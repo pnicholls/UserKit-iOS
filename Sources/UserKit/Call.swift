@@ -62,6 +62,8 @@ public struct Call {
                     return .concatenate(
                         .run { send in
                             await webRTCClient.configure()
+                            await audioSessionClient.configure()
+                            await audioSessionClient.addNotificationObservers()
                         },
                         .send(.webRTC(.push))
                     )

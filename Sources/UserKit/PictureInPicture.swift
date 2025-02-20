@@ -89,7 +89,7 @@ final class PictureInPictureViewController: UIViewController {
         
         observe { [weak self] in
             guard let self else { return }
-            
+                        
             switch store.state.state {
             case .starting where !(pictureInPictureController?.isPictureInPictureActive ?? false):
                 pictureInPictureController?.startPictureInPicture()
