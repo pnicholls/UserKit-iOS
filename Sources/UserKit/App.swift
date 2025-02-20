@@ -65,19 +65,6 @@ public struct UserKitApp {
                     })))
                 }
                 
-
-//            case .user(.call(.pictureInPicture(.started))):
-//                state.isPresented = false
-//                return .none
-
-//            case .user(.call(.pictureInPicture(.stop))):
-//                state.isPresented = true
-//                return .none
-//                
-//            case .user(.call(.pictureInPicture(.restore))):
-//                state.isPresented = true
-//                return .none
-                                
             case .user:
                 return .none
             }
@@ -85,21 +72,17 @@ public struct UserKitApp {
         .ifLet(\.user, action: \.user) {
             User()
         }
-//        .onChange(of: { $0.user?.call }) { oldValue, newValue in
-//            Reduce { state, action in
-//                switch (newValue) {
-//                case .some(let callState) where callState.pi:
-//                    state.isPresented = false
-//                case .some(let callState) where callState.isPictureInPictureActive == false:
-//                    state.isPresented = true
-//                case .none:
-//                    state.isPresented = false
-//                default:
-//                    state.isPresented = false
-//                }
-//                
-//                return .none
-//            }
-//        }
+        .onChange(of: { $0.user?.call }) { oldValue, newValue in
+            Reduce { state, action in
+                switch (newValue) {
+                case .some(let callState) where callState.alert != nil:
+                    state.isPresented = true
+                default:
+                    state.isPresented = false
+                }
+                
+                return .none
+            }
+        }
     }
 }
