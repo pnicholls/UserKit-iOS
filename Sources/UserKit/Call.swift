@@ -67,17 +67,17 @@ public struct Call {
                 case .some:
                     return .concatenate(
                         .run { send in
-                            let jsonData = try JSONSerialization.data(withJSONObject: ["type": "participantJoined"], options: .prettyPrinted)
-                            if let jsonString = String(data: jsonData, encoding: .utf8) {
-                                try await webSocketClient.send(id: WebSocketClient.ID(), message: .string(jsonString))
-                            }
-                        },
-                        .run { send in
                             await webRTCClient.configure()
 
                             // Disabling for now just so its not annoying
                             // await audioSessionClient.configure()
                             // await audioSessionClient.addNotificationObservers()
+                        },
+                        .run { send in
+                            let jsonData = try JSONSerialization.data(withJSONObject: ["type": "participantJoined"], options: .prettyPrinted)
+                            if let jsonString = String(data: jsonData, encoding: .utf8) {
+                                try await webSocketClient.send(id: WebSocketClient.ID(), message: .string(jsonString))
+                            }
                         },
                         .send(.webRTC(.push))
                     )
