@@ -45,7 +45,6 @@ public struct Call {
         case alert(PresentationAction<Alert>)
         case apiClient(ApiClientAction)
         case appeared
-        case configure
         case participants(IdentifiedActionOf<Participant>)
         case pictureInPicture(PictureInPicture.Action)
         case webRTC(WebRTC)
@@ -73,7 +72,13 @@ public struct Call {
                                 try await webSocketClient.send(id: WebSocketClient.ID(), message: .string(jsonString))
                             }
                         },
-                        .send(.configure),
+                        .run { send in
+                            await webRTCClient.configure()
+
+                            // Disabling for now just so its not annoying
+                            // await audioSessionClient.configure()
+                            // await audioSessionClient.addNotificationObservers()
+                        },
                         .send(.webRTC(.push))
                     )
                 default:
@@ -222,7 +227,13 @@ public struct Call {
                 switch participant.state {
                 case .joined:
                     return .concatenate(
-                        .send(.configure),
+                        .run { send in
+                            await webRTCClient.configure()
+
+                            // Disabling for now just so its not annoying
+                            // await audioSessionClient.configure()
+                            // await audioSessionClient.addNotificationObservers()
+                        },
                         .send(.webRTC(.push))
                     )
                 default:
@@ -253,16 +264,7 @@ public struct Call {
                         try await apiClient.request(endpoint: .postSession(.init()), as: APIClient.PostSessionResponse.self)
                     })))
                 }
-                
-            case .configure:
-                return .run { send in
-                    await webRTCClient.configure()
-
-                    // Disabling for now just so its not annoying
-                    // await audioSessionClient.configure()
-                    // await audioSessionClient.addNotificationObservers()
-                }
-                                
+                                                
             case .participants(.element(id: let participantId, action: .tracks(.element(id: let trackId, action: .request)))):
                 guard let track = state.participants[id: participantId]?.tracks[id: trackId] else {
                     return .none
