@@ -45,6 +45,7 @@ public struct Call {
         case alert(PresentationAction<Alert>)
         case apiClient(ApiClientAction)
         case appeared
+        case configure
         case participants(IdentifiedActionOf<Participant>)
         case pictureInPicture(PictureInPicture.Action)
         case webRTC(WebRTC)
@@ -57,14 +58,22 @@ public struct Call {
                 state.alert = nil
                 state.pictureInPicture = .init()
                 
+                guard let participant = state.participants.first(where: { $0.role == .user }) else {
+                    return .none
+                }
+
+                state.participants[id: participant.id]?.state = .joined
+                
                 switch state.sessionId {
                 case .some:
                     return .concatenate(
                         .run { send in
-                            await webRTCClient.configure()
-                            await audioSessionClient.configure()
-                            await audioSessionClient.addNotificationObservers()
+                            let jsonData = try JSONSerialization.data(withJSONObject: ["type": "participantJoined"], options: .prettyPrinted)
+                            if let jsonString = String(data: jsonData, encoding: .utf8) {
+                                try await webSocketClient.send(id: WebSocketClient.ID(), message: .string(jsonString))
+                            }
                         },
+                        .send(.configure),
                         .send(.webRTC(.push))
                     )
                 default:
@@ -78,6 +87,11 @@ public struct Call {
                 return .none
                 
             case .alert(.presented(.decline)):
+                guard let participant = state.participants.first(where: { $0.role == .user }) else {
+                    return .none
+                }
+
+                state.participants[id: participant.id]?.state = .declined
                 return .none
                 
             case .alert(.presented(.end)):
@@ -153,6 +167,10 @@ public struct Call {
                         _  = await webRTCClient.setRemoteDescription(.init(sdp: response.sessionDescription.sdp, type: .answer))
                     },
                     .run { [state] send in
+                        guard let participant = state.participants.first(where: { $0.role == .user }) else {
+                            return
+                        }
+
                         let tracks: [[String: Any]] = await webRTCClient.localTransceivers().map { type, transceiver in
                             [
                                 "id": "\(state.sessionId!)/\(transceiver.sender.track!.trackId)",
@@ -161,20 +179,32 @@ public struct Call {
                             ]
                         }
                         
-                        let participant: [String: Any] = [
-                            "state": "none",
+                        let data: [String: Any] = [
+                            "state": participant.state.rawValue,
                             "transceiverSessionId": state.sessionId!,
                             "tracks": tracks
                         ]
 
                         let participantUpdate: [String: Any] = [
                             "type": "participantUpdate",
-                            "participant": participant
+                            "participant": data
                         ]
 
                         let jsonData = try JSONSerialization.data(withJSONObject: participantUpdate, options: .prettyPrinted)
                         if let jsonString = String(data: jsonData, encoding: .utf8) {
                             try await webSocketClient.send(id: WebSocketClient.ID(), message: .string(jsonString))
+                        }
+                    },
+                    .run { [participants = state.participants] send in
+                        for participant in participants {
+                            for track in participant.tracks {
+                                switch track.pullState {
+                                case .notPulled, .failed(_):
+                                    await send(.participants(.element(id: participant.id, action: .tracks(.element(id: track.id, action: .pull)))))
+                                default:
+                                    break
+                                }
+                            }
                         }
                     }
                 )
@@ -184,22 +214,21 @@ public struct Call {
             
             case .apiClient(.postSessionResponse(.success(let response))):
                 state.sessionId = response.sessionId
-                return .none
+
+                guard let participant = state.participants.first(where: { $0.role == .user }) else {
+                    return .none
+                }
                 
-                // TODO: Use the user participants state to determine if the user has already joined
-                
-//                switch state.destination {
-//                case .active:
-//                    return .concatenate(
-//                        .run { send in
-//                            await webRTCClient.configure()
-//                        },
-//                        .send(.webRTC(.push))
-//                    )
-//                default:
-//                    return .none
-//                }
-            
+                switch participant.state {
+                case .joined:
+                    return .concatenate(
+                        .send(.configure),
+                        .send(.webRTC(.push))
+                    )
+                default:
+                    return .none
+                }
+                            
             case .apiClient(.renegotiateResponse(.failure(_))):
                 return .none
                 
@@ -223,6 +252,15 @@ public struct Call {
                     await send(.apiClient(.postSessionResponse(Result {
                         try await apiClient.request(endpoint: .postSession(.init()), as: APIClient.PostSessionResponse.self)
                     })))
+                }
+                
+            case .configure:
+                return .run { send in
+                    await webRTCClient.configure()
+
+                    // Disabling for now just so its not annoying
+                    // await audioSessionClient.configure()
+                    // await audioSessionClient.addNotificationObservers()
                 }
                                 
             case .participants(.element(id: let participantId, action: .tracks(.element(id: let trackId, action: .request)))):
@@ -260,6 +298,10 @@ public struct Call {
                 }
 
                 return .run { [state] send in
+                    guard let participant = state.participants.first(where: { $0.role == .user }), participant.state == .joined else {
+                        return
+                    }
+                    
                     let tracks: [[String: Any]] = await webRTCClient.localTransceivers().map { type, transceiver in
                         let transceiverTrackId = transceiver.sender.track!.trackId
                         let trackState = state.participants[id: participantId]?.tracks[id: transceiverTrackId]
@@ -271,15 +313,15 @@ public struct Call {
                         ]
                     }
                     
-                    let participant: [String: Any] = [
-                        "state": "none",
+                    let data: [String: Any] = [
+                        "state": participant.state.rawValue,
                         "transceiverSessionId": state.sessionId!,
                         "tracks": tracks
                     ]
 
                     let participantUpdate: [String: Any] = [
                         "type": "participantUpdate",
-                        "participant": participant
+                        "participant": data
                     ]
 
                     let jsonData = try JSONSerialization.data(withJSONObject: participantUpdate, options: .prettyPrinted)
@@ -289,6 +331,10 @@ public struct Call {
                 }
                 
             case .participants(.element(id: let participantId, action: .tracks(.element(id: _, action: .pull)))):
+                guard let participant = state.participants.first(where: { $0.role == .user }), participant.state == .joined else {
+                    return .none
+                }
+
                 guard let sessionId = state.sessionId else {
                     return .none
                 }
