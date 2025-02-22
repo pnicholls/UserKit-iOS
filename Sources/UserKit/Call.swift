@@ -74,7 +74,7 @@ public struct Call {
                             // await audioSessionClient.configure()
                             // await audioSessionClient.addNotificationObservers()
                         },
-                        .send(.webRTC(.push)),
+//                        .send(.webRTC(.push)),
                         .run { send in
                             let jsonData = try JSONSerialization.data(withJSONObject: ["type": "participantJoined"], options: .prettyPrinted)
                             if let jsonString = String(data: jsonData, encoding: .utf8) {
@@ -234,8 +234,9 @@ public struct Call {
                             // Disabling for now just so its not annoying
                             // await audioSessionClient.configure()
                             // await audioSessionClient.addNotificationObservers()
-                        },
-                        .send(.webRTC(.push))
+                        }
+//                        ,
+//                        .send(.webRTC(.push))
                     )
                 default:
                     return .none
