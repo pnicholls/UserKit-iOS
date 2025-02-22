@@ -66,6 +66,7 @@ public struct Call {
                 switch state.sessionId {
                 case .some:
                     return .concatenate(
+                        // It is important that configure run before anything else so that any websocket message does not trigger a webrtc func
                         .run { send in
                             await webRTCClient.configure()
 
@@ -73,13 +74,13 @@ public struct Call {
                             // await audioSessionClient.configure()
                             // await audioSessionClient.addNotificationObservers()
                         },
+                        .send(.webRTC(.push)),
                         .run { send in
                             let jsonData = try JSONSerialization.data(withJSONObject: ["type": "participantJoined"], options: .prettyPrinted)
                             if let jsonString = String(data: jsonData, encoding: .utf8) {
                                 try await webSocketClient.send(id: WebSocketClient.ID(), message: .string(jsonString))
                             }
-                        },
-                        .send(.webRTC(.push))
+                        }
                     )
                 default:
                     return .none
