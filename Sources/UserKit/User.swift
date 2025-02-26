@@ -15,7 +15,6 @@ public struct User {
     
     @Dependency(\.apiClient) var apiClient
     @Dependency(\.cameraClient) var cameraClient
-    @Dependency(\.continuousClock) var clock
     @Dependency(\.webRTCClient) var webRTCClient
     @Dependency(\.webSocketClient) var webSocketClient
     
@@ -73,7 +72,7 @@ public struct User {
                                 case .didOpen:
                                     group.addTask {
                                         while !Task.isCancelled {
-                                            try await self.clock.sleep(for: .seconds(10))
+                                            try await Task.sleep(nanoseconds: 10 * 1_000_000_000)
                                             try? await self.webSocketClient.sendPing(id: WebSocketClient.ID())
                                         }
                                     }
@@ -267,8 +266,6 @@ struct UserView: View {
         WithPerceptionTracking {
             if let store = store.scope(state: \.call, action: \.call) {
                 CallView(store: store)
-            } else {
-                EmptyView()
             }
         }
     }

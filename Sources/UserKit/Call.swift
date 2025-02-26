@@ -153,7 +153,7 @@ public struct Call {
                 }
                 
                 return .run { [participants = state.participants] send in
-                    try await Task.sleep(for: .seconds(3))
+                    try await Task.sleep(nanoseconds: 3 * 1_000_000_000)
                     
                     for participant in participants {
                         for track in participant.tracks {
@@ -277,7 +277,7 @@ public struct Call {
                     state.pictureInPicture?.state = .stopped
                     
                     return .concatenate(
-                        .run { send in try await Task.sleep(for: .seconds(1)) },
+                        .run { send in try await Task.sleep(nanoseconds: 1 * 1_000_000_000) },
                         .send(.participants(.element(id: participantId, action: .tracks(.element(id: trackId, action: .start)))))
                     )
                     
