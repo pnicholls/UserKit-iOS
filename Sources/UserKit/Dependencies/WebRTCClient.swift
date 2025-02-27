@@ -12,7 +12,7 @@ import WebRTC
 
 public struct WebRTCClient {
     public var close: @Sendable () async -> ()
-    public var configure: @Sendable () async -> ()
+    public var configure: @Sendable () async throws -> ()
     public var answer: @Sendable () async -> AsyncThrowingStream<SessionDescription, Error> = {  .finished() }
     public var offer: @Sendable () async -> AsyncThrowingStream<SessionDescription, Error> = {  .finished() }
     public var setLocalDescription: @Sendable (_ sessionDescription: SessionDescription) async -> AsyncThrowingStream<SessionDescription, Error> = { _ in .finished() }
@@ -25,6 +25,8 @@ public struct WebRTCClient {
 }
 
 extension WebRTCClient {
+    public struct PeerConnectionInitFailed: Error, Equatable {}
+    
     public struct Transceiver {
         public let location: String
         public let mid: String
@@ -81,7 +83,7 @@ extension WebRTCClient: DependencyKey {
             await client.close()
         },
         configure: {
-            await client.configure()
+            try await client.configure()
         }, answer: {
             await client.answer()
         }, offer: {
@@ -134,7 +136,7 @@ private actor Client: NSObject {
         peerConnection?.close()
     }
     
-    func configure() async {
+    func configure() async throws {
         let config = RTCConfiguration()
         config.bundlePolicy = .maxBundle
         config.iceServers = [RTCIceServer(urlStrings: ["stun:stun.cloudflare.com:3478"])]
@@ -150,7 +152,7 @@ private actor Client: NSObject {
                                               optionalConstraints: ["DtlsSrtpKeyAgreement": kRTCMediaConstraintsValueTrue])
         
         guard let peerConnection = Client.factory.peerConnection(with: config, constraints: constraints, delegate: nil) else {
-            fatalError("Could not create new RTCPeerConnection")
+            throw WebRTCClient.PeerConnectionInitFailed()
         }
         
         self.peerConnection = peerConnection

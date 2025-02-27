@@ -39,6 +39,12 @@ public struct Call {
         }
         
         public enum WebRTC: Equatable {
+            public enum Configure: Equatable {
+                case failure
+                case success
+            }
+            
+            case configure(Configure)
             case push
         }
         
@@ -65,23 +71,14 @@ public struct Call {
                 
                 switch state.sessionId {
                 case .some:
-                    return .concatenate(
-                        // It is important that configure run before anything else so that any websocket message does not trigger a webrtc func
-                        .run { send in
-                            await webRTCClient.configure()
-
-                            // Disabling for now just so its not annoying
-                            // await audioSessionClient.configure()
-                            // await audioSessionClient.addNotificationObservers()
-                        },
-//                        .send(.webRTC(.push)),
-                        .run { send in
-                            let jsonData = try JSONSerialization.data(withJSONObject: ["type": "participantJoined"], options: .prettyPrinted)
-                            if let jsonString = String(data: jsonData, encoding: .utf8) {
-                                try await webSocketClient.send(id: WebSocketClient.ID(), message: .string(jsonString))
-                            }
+                    return .run { send in
+                        do {
+                            try await webRTCClient.configure()
+                            await send(.webRTC(.configure(.success)))
+                        } catch {
+                            await send(.webRTC(.configure(.failure)))
                         }
-                    )
+                    }
                 default:
                     return .none
                 }
@@ -227,17 +224,14 @@ public struct Call {
                 
                 switch participant.state {
                 case .joined:
-                    return .concatenate(
-                        .run { send in
-                            await webRTCClient.configure()
-
-                            // Disabling for now just so its not annoying
-                            // await audioSessionClient.configure()
-                            // await audioSessionClient.addNotificationObservers()
+                    return .run { send in
+                        do {
+                            try await webRTCClient.configure()
+                            await send(.webRTC(.configure(.success)))
+                        } catch {
+                            await send(.webRTC(.configure(.failure)))
                         }
-//                        ,
-//                        .send(.webRTC(.push))
-                    )
+                    }
                 default:
                     return .none
                 }
@@ -411,6 +405,17 @@ public struct Call {
                 
             case .pictureInPicture:
                 return .none
+                
+            case .webRTC(.configure(.failure)):
+                return .none
+                
+            case .webRTC(.configure(.success)):
+                return .run { send in
+                    let jsonData = try JSONSerialization.data(withJSONObject: ["type": "participantJoined"], options: .prettyPrinted)
+                    if let jsonString = String(data: jsonData, encoding: .utf8) {
+                        try await webSocketClient.send(id: WebSocketClient.ID(), message: .string(jsonString))
+                    }
+                }
                 
             case .webRTC(.push):
                 guard let sessionId = state.sessionId else {
