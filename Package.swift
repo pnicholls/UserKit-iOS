@@ -16,7 +16,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/pointfreeco/swift-composable-architecture", from: "1.10.0"),
-        .package(url: "https://github.com/webrtc-sdk/specs", from: "125.6422.07")
+        .package(url: "https://github.com/webrtc-sdk/Specs", from: "125.6422.07")
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
