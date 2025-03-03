@@ -269,7 +269,7 @@ public struct Call {
                             try await webSocketClient.send(id: WebSocketClient.ID(), message: .string(jsonString))
                         }
                     },
-                    .send(.webRTC(.pull))
+                    .send(.webRTC(.push))
                 )
                 
             case .webRTC(.push):
