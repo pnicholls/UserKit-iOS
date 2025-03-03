@@ -15,7 +15,6 @@ let package = Package(
             targets: ["UserKit"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/pointfreeco/swift-composable-architecture", from: "1.10.0"),
         .package(url: "https://github.com/webrtc-sdk/Specs", from: "125.6422.07")
     ],
     targets: [
@@ -24,7 +23,6 @@ let package = Package(
         .target(
             name: "UserKit",
             dependencies: [
-                .product(name: "ComposableArchitecture", package: "swift-composable-architecture"),
                 .product(name: "WebRTC", package: "specs")
             ]
         ),

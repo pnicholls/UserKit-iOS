@@ -1,68 +1,71 @@
 //
-//  File.swift
-//  
+//  APIClient.swift
+//  UserKit
 //
-//  Created by Peter Nicholls on 6/9/2024.
-//
-
-//
-//  File.swift
-//
-//
-//  Created by Peter Nicholls on 6/9/2024.
+//  Created by Peter Nicholls on 4/3/2025.
 //
 
-import ComposableArchitecture
 import Foundation
 
-//let baseURL = "https://glory-contents-nation-would.trycloudflare.com"
 let baseURL = "https://getuserkit.com"
 
-actor APIClientState {
+actor APIClient {
     private var accessToken: String?
     
-    func setAccessToken(_ accessToken: String) {
-        self.accessToken = accessToken
+    func setAccessToken(_ token: String) {
+        self.accessToken = token
     }
     
-    func getAccessToken() -> String? {
-        return accessToken
-    }
-}
-
-public struct APIClient {
-    private let state: APIClientState
-    var _request: (String, APIClient.Route) async throws -> Data
-    
-    init(state: APIClientState = APIClientState(), request: @escaping (String, APIClient.Route) async throws -> Data) {
-        self.state = state
-        self._request = request
-    }
-    
-    func setAccessToken(_ accessToken: String) async {
-        await state.setAccessToken(accessToken)
-    }
-    
-    func request<T: Decodable>(apiKey: String, endpoint: APIClient.Route, as type: T.Type) async throws -> T {
+    func request<T: Decodable>(apiKey: String, endpoint: Route, as type: T.Type) async throws -> T {
+        let data = try await performRequest(apiKey, endpoint)
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
-
-        return try await decoder.decode(T.self, from: self._request(apiKey, endpoint))
+        return try decoder.decode(T.self, from: data)
     }
-  
-    func request<T: Decodable>(endpoint: APIClient.Route, as type: T.Type) async throws -> T {
-        guard let accessToken = await state.getAccessToken() else {
+    
+    func request<T: Decodable>(endpoint: Route, as type: T.Type) async throws -> T {
+        guard let token = accessToken else {
             throw APIError.missingAPIKey
         }
         
+        let data = try await performRequest(token, endpoint)
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
-
-        return try await decoder.decode(T.self, from: self._request(accessToken, endpoint))
+        return try decoder.decode(T.self, from: data)
     }
-}
-
-extension APIClient {
+    
+    private func performRequest(_ token: String, _ route: Route) async throws -> Data {
+        guard let url = URL(string: route.url) else {
+            throw APIError.invalidURL
+        }
+        
+        var request = URLRequest(url: url)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.httpMethod = route.method.rawValue
+        
+        let encoder = route.encoder
+        
+        if let body = route.body {
+            let json = try encoder.encode(body)
+            request.httpBody = json
+            
+            print("Raw JSON Request: \(String(data: json, encoding: .utf8) ?? "unable to decode")")
+        }
+        
+        let (data, _) = try await URLSession.shared.data(for: request)
+        
+        // Print raw JSON response
+        if let jsonString = String(data: data, encoding: .utf8) {
+            print("Raw JSON Response: \(jsonString)")
+        } else {
+            print("Unable to convert response data to string")
+        }
+        
+        return data
+    }
+    
+    // Model types and request structure from original code
     enum Route: Equatable {
         enum Method: String {
             case get, post, put, delete
@@ -90,27 +93,15 @@ extension APIClient {
                 
             case .renegotiate(let sessionId, _):
                 "\(baseURL)/api/calls/sessions/\(sessionId)/renegotiate"
-        
             }
         }
         
         var method: Method {
             switch self {
-            case .postSession:
+            case .postSession, .postUser, .pullTracks, .pushTracks:
                 return .post
-                
-            case .postUser:
-                return .post
-                
-            case .pullTracks:
-                return .post
-                
-            case .pushTracks:
-                return .post
-                
             case .renegotiate:
                 return .put
-                
             }
         }
         
@@ -118,59 +109,42 @@ extension APIClient {
             switch self {
             case .postSession:
                 return nil
-                
             case .postUser(let request):
                 return request
-                
             case .pullTracks(_, let request):
                 return request
-                
             case .pushTracks(_, let request):
                 return request
-                
             case .renegotiate(_, let request):
                 return request
-                
             }
         }
         
         var encoder: JSONEncoder {
-            switch self {
-            case .postSession:
-                return JSONEncoder()
-                
-            case .pullTracks:
-                return JSONEncoder()
-                
-            case .pushTracks:
-                return JSONEncoder()
-                
-            case .renegotiate:
-                return JSONEncoder()
-                
-            default:
-                let encoder = JSONEncoder()
+            let encoder = JSONEncoder()
+            
+            if case .postUser = self {
                 encoder.keyEncodingStrategy = .convertToSnakeCase
-                return encoder
             }
+            
+            return encoder
         }
     }
-        
+    
     enum APIError: Error {
         case invalidURL
         case missingAPIKey
     }
-}
-
-extension APIClient {
+    
+    // Request/Response Models
     struct PostSessionRequest: Codable, Equatable {}
     
-    public struct SessionDescription: Codable, Equatable {
+    struct SessionDescription: Codable, Equatable {
         let sdp: String
         let type: String
     }
     
-    public struct PostSessionResponse: Codable, Equatable {
+    struct PostSessionResponse: Codable, Equatable {
         let sessionId: String
     }
     
@@ -181,7 +155,7 @@ extension APIClient {
         let appVersion: String?
     }
     
-    public struct UserResponse: Codable, Equatable {
+    struct UserResponse: Codable, Equatable {
         let accessToken: String
         let webSocketUrl: URL
     }
@@ -196,12 +170,12 @@ extension APIClient {
         }
     }
     
-    public struct PullTracksResponse: Codable, Equatable {
+    struct PullTracksResponse: Codable, Equatable {
         let requiresImmediateRenegotiation: Bool
         let tracks: [Track]
         let sessionDescription: SessionDescription?
         
-        public struct Track: Codable, Equatable {
+        struct Track: Codable, Equatable {
             let mid: String
             let trackName: String
             let sessionId: String
@@ -232,7 +206,7 @@ extension APIClient {
         }
     }
     
-    public struct PushTracksResponse: Codable, Equatable {
+    struct PushTracksResponse: Codable, Equatable {
         let requiresImmediateRenegotiation: Bool
         let tracks: [Track]
         let sessionDescription: SessionDescription
@@ -243,53 +217,9 @@ extension APIClient {
         }
     }
     
-    public struct RenegotiateRequest: Codable, Equatable {
+    struct RenegotiateRequest: Codable, Equatable {
         let sessionDescription: SessionDescription
     }
     
-    public struct RenegotiateResponse: Codable, Equatable {}
-}
-
-extension APIClient: DependencyKey {
-    public static var liveValue: APIClient {
-        return Self(request: { accessToken, route in
-            guard let url = URL(string: route.url) else {
-                throw APIError.invalidURL
-            }
-            
-            var request = URLRequest(url: url)
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-            request.httpMethod = route.method.rawValue
-
-            let encoder = route.encoder
-            
-            if let body = route.body {
-                let json = try! encoder.encode(body)
-                request.httpBody = json
-                
-                print("Raw JSON Request: \(String(data: json, encoding: .utf8))")
-            }
-            
-            let (data, _) = try await URLSession.shared.data(for: request)
-            
-            // Print raw JSON response
-            if let jsonString = String(data: data, encoding: .utf8) {
-                print("Raw JSON Response: \(jsonString)")
-            } else {
-                print("Unable to convert response data to string")
-            }
-            
-            return data
-        })
-    }
-}
-
-// MARK: - Dependency
-
-extension DependencyValues {
-    var apiClient: APIClient {
-        get { self[APIClient.self] }
-        set { self[APIClient.self] = newValue}
-    }
+    struct RenegotiateResponse: Codable, Equatable {}
 }

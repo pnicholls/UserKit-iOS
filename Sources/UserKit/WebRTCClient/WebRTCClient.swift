@@ -1,52 +1,31 @@
 //
-//  File.swift
-//  
+//  WebRTCClient.swift
+//  UserKit
 //
-//  Created by Peter Nicholls on 10/9/2024.
+//  Created by Peter Nicholls on 4/3/2025.
 //
 
-import Foundation
-import Dependencies
-import DependenciesMacros
 import WebRTC
 
-public struct WebRTCClient {
-    public var close: @Sendable () async -> ()
-    public var configure: @Sendable () async throws -> ()
-    public var answer: @Sendable () async -> AsyncThrowingStream<SessionDescription, Error> = {  .finished() }
-    public var offer: @Sendable () async -> AsyncThrowingStream<SessionDescription, Error> = {  .finished() }
-    public var setLocalDescription: @Sendable (_ sessionDescription: SessionDescription) async -> AsyncThrowingStream<SessionDescription, Error> = { _ in .finished() }
-    public var localDescription: @Sendable () async -> SessionDescription
-    public var localTransceivers: @Sendable () async -> [String: RTCRtpTransceiver]
-    public var transceivers: @Sendable () async -> [RTCRtpTransceiver]
-    public var setRemoteDescription: @Sendable (_ sessionDescription: SessionDescription) async -> AsyncThrowingStream<SessionDescription, Error> = { _ in .finished() }
-    public var handleVideoSourceBuffer: @Sendable (_ sampleBuffer: CMSampleBuffer) async -> ()
-    public var handleScreenShareSourceBuffer: @Sendable (_ sampleBuffer: CMSampleBuffer) async -> ()
-}
-
-extension WebRTCClient {
-    public struct PeerConnectionInitFailed: Error, Equatable {}
+actor WebRTCClient {
+    private var peerConnection: RTCPeerConnection?
+    private var peerConnectionDelegate: PeerConnectionDelegate?
+    private var videoSource: RTCVideoSource?
+    private var videoCapturer: RTCVideoCapturer?
+    private var screenShareSource: RTCVideoSource?
+    private var screenShareCapturer: RTCVideoCapturer?
+    private var localTransceivers: [String: RTCRtpTransceiver] = [:]
     
-    public struct Transceiver {
-        public let location: String
-        public let mid: String
-        public let trackName: String?
-    }
+    private static let factory: RTCPeerConnectionFactory = {
+        RTCInitializeSSL()
+        let videoEncoderFactory = RTCDefaultVideoEncoderFactory()
+        let videoDecoderFactory = RTCDefaultVideoDecoderFactory()
+        return RTCPeerConnectionFactory(encoderFactory: videoEncoderFactory, decoderFactory: videoDecoderFactory)
+    }()
     
-    enum SdpType: String, Codable {
-        case offer, prAnswer, answer, rollback
-        
-        var rtcSdpType: RTCSdpType {
-            switch self {
-            case .offer:    return .offer
-            case .answer:   return .answer
-            case .prAnswer: return .prAnswer
-            case .rollback: return .rollback
-            }
-        }
-    }
+    struct PeerConnectionInitFailed: Error {}
     
-    public struct SessionDescription {
+    struct SessionDescription {
         let sdp: String
         let type: SdpType
         
@@ -72,65 +51,19 @@ extension WebRTCClient {
             return RTCSessionDescription(type: self.type.rtcSdpType, sdp: self.sdp)
         }
     }
-}
-
-extension WebRTCClient: DependencyKey {
     
-    public static var liveValue: WebRTCClient {
-        let client = Client()
-        return WebRTCClient(
-        close: {
-            await client.close()
-        },
-        configure: {
-            try await client.configure()
-        }, answer: {
-            await client.answer()
-        }, offer: {
-            await client.offer()
-        }, setLocalDescription: { sessionDescription in
-            await client.setLocalDescription(sessionDescription: sessionDescription)
-        }, localDescription: {
-            await client.localDescription()
-        }, localTransceivers: {
-            await client.localTransceivers
-        }, transceivers: {
-            await client.transceivers()
-        }, setRemoteDescription: { sessionDescription in
-            await client.setRemoteDescription(sessionDescription: sessionDescription)
-        }, handleVideoSourceBuffer: { sampleBuffer in
-            await client.handleVideoSourceBuffer(sampleBuffer: sampleBuffer)
-        }, handleScreenShareSourceBuffer: { sampleBuffer in
-            await client.handleScreenShareSourceBuffer(sampleBuffer: sampleBuffer)
-        })
+    enum SdpType: String, Codable {
+        case offer, prAnswer, answer, rollback
+        
+        var rtcSdpType: RTCSdpType {
+            switch self {
+            case .offer:    return .offer
+            case .answer:   return .answer
+            case .prAnswer: return .prAnswer
+            case .rollback: return .rollback
+            }
+        }
     }
-    
-}
-
-extension DependencyValues {
-    public var webRTCClient: WebRTCClient {
-        get { self[WebRTCClient.self] }
-        set { self[WebRTCClient.self] = newValue }
-    }
-}
-
-private actor Client: NSObject {
-    var peerConnection: RTCPeerConnection?
-    var peerConnectionDelegate: PeerConnectionDelegate?
-    var videoSource: RTCVideoSource?
-    var videoCapturer: RTCVideoCapturer?
-    var screenShareSource: RTCVideoSource?
-    var screenShareCapturer: RTCVideoCapturer?
-    var localTransceivers: [String: RTCRtpTransceiver] = [:]
-    private let mediaConstraints = [kRTCMediaConstraintsOfferToReceiveAudio: kRTCMediaConstraintsValueTrue,
-                                   kRTCMediaConstraintsOfferToReceiveVideo: kRTCMediaConstraintsValueTrue]
-    
-    private static let factory: RTCPeerConnectionFactory = {
-        RTCInitializeSSL()
-        let videoEncoderFactory = RTCDefaultVideoEncoderFactory()
-        let videoDecoderFactory = RTCDefaultVideoDecoderFactory()
-        return RTCPeerConnectionFactory(encoderFactory: videoEncoderFactory, decoderFactory: videoDecoderFactory)
-    }()
     
     func close() async {
         peerConnection?.close()
@@ -149,10 +82,10 @@ private actor Client: NSObject {
         
         // Define media constraints. DtlsSrtpKeyAgreement is required to be true to be able to connect with web browsers.
         let constraints = RTCMediaConstraints(mandatoryConstraints: nil,
-                                              optionalConstraints: ["DtlsSrtpKeyAgreement": kRTCMediaConstraintsValueTrue])
+                                             optionalConstraints: ["DtlsSrtpKeyAgreement": kRTCMediaConstraintsValueTrue])
         
-        guard let peerConnection = Client.factory.peerConnection(with: config, constraints: constraints, delegate: nil) else {
-            throw WebRTCClient.PeerConnectionInitFailed()
+        guard let peerConnection = WebRTCClient.factory.peerConnection(with: config, constraints: constraints, delegate: nil) else {
+            throw PeerConnectionInitFailed()
         }
         
         self.peerConnection = peerConnection
@@ -165,11 +98,11 @@ private actor Client: NSObject {
         addScreenShareTrack()
     }
     
-    func addAudioTrack() {
+    private func addAudioTrack() {
         let audioConstrains = RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil)
-        let audioSource = Client.factory.audioSource(with: audioConstrains)
+        let audioSource = WebRTCClient.factory.audioSource(with: audioConstrains)
         
-        let audioTrack = Client.factory.audioTrack(with: audioSource, trackId: UUID().uuidString)
+        let audioTrack = WebRTCClient.factory.audioTrack(with: audioSource, trackId: UUID().uuidString)
         
         let transceiverInit = RTCRtpTransceiverInit()
         transceiverInit.direction = .sendOnly
@@ -177,9 +110,9 @@ private actor Client: NSObject {
         localTransceivers["audio"] = self.peerConnection?.addTransceiver(with: audioTrack, init: transceiverInit)
     }
     
-    func addVideoTrack() {
-        self.videoSource = Client.factory.videoSource()
-        let videoTrack = Client.factory.videoTrack(with: videoSource!, trackId: UUID().uuidString)
+    private func addVideoTrack() {
+        self.videoSource = WebRTCClient.factory.videoSource()
+        let videoTrack = WebRTCClient.factory.videoTrack(with: videoSource!, trackId: UUID().uuidString)
         self.videoCapturer = RTCVideoCapturer(delegate: videoSource!)
         
         let transceiverInit = RTCRtpTransceiverInit()
@@ -203,14 +136,13 @@ private actor Client: NSObject {
         }
     }
     
-    func addScreenShareTrack() {
-        self.screenShareSource = Client.factory.videoSource()
-        let screenShareTrack = Client.factory.videoTrack(with: screenShareSource!, trackId: UUID().uuidString)
+    private func addScreenShareTrack() {
+        self.screenShareSource = WebRTCClient.factory.videoSource()
+        let screenShareTrack = WebRTCClient.factory.videoTrack(with: screenShareSource!, trackId: UUID().uuidString)
         self.screenShareCapturer = RTCVideoCapturer(delegate: screenShareSource!)
         
         let transceiverInit = RTCRtpTransceiverInit()
         transceiverInit.direction = .sendOnly
-        
         
         guard let transceiver = self.peerConnection?.addTransceiver(with: screenShareTrack, init: transceiverInit) else {
             return
@@ -229,107 +161,111 @@ private actor Client: NSObject {
             transceiver.sender.parameters = parameters
         }
     }
-            
-    func offer() -> AsyncThrowingStream<WebRTCClient.SessionDescription, Error> {
-        AsyncThrowingStream { continuation in
-            guard let peerConnection = peerConnection else {
-                struct NoPeerConnectionError: Error {}
-                return continuation.finish(throwing: NoPeerConnectionError())
-            }
-            
+    
+    func createOffer() async throws -> SessionDescription {
+        guard let peerConnection = peerConnection else {
+            struct NoPeerConnectionError: Error {}
+            throw NoPeerConnectionError()
+        }
+        
+        return try await withCheckedThrowingContinuation { continuation in
             let constraints = RTCMediaConstraints(mandatoryConstraints: nil,
                                                  optionalConstraints: nil)
             peerConnection.offer(for: constraints) { (sdp, error) in
-                guard error == nil else {
-                    return continuation.finish(throwing: error)
+                if let error = error {
+                    continuation.resume(throwing: error)
+                    return
                 }
                 
                 guard let sdp = sdp else {
                     struct NoSdpError: Error {}
-                    return continuation.finish(throwing: NoSdpError())
+                    continuation.resume(throwing: NoSdpError())
+                    return
                 }
                 
-                continuation.yield(.init(from: sdp))
-                continuation.finish()
+                continuation.resume(returning: .init(from: sdp))
             }
         }
     }
     
-    func answer() -> AsyncThrowingStream<WebRTCClient.SessionDescription, Error> {
-        AsyncThrowingStream { continuation in
-            guard let peerConnection = peerConnection else {
-                struct NoPeerConnectionError: Error {}
-                return continuation.finish(throwing: NoPeerConnectionError())
-            }
-            
+    func createAnswer() async throws -> SessionDescription {
+        guard let peerConnection = peerConnection else {
+            struct NoPeerConnectionError: Error {}
+            throw NoPeerConnectionError()
+        }
+        
+        return try await withCheckedThrowingContinuation { continuation in
             let constraints = RTCMediaConstraints(mandatoryConstraints: nil,
                                                  optionalConstraints: nil)
             peerConnection.answer(for: constraints) { (sdp, error) in
-                guard error == nil else {
-                    return continuation.finish(throwing: error)
+                if let error = error {
+                    continuation.resume(throwing: error)
+                    return
                 }
                 
                 guard let sdp = sdp else {
                     struct NoSdpError: Error {}
-                    return continuation.finish(throwing: NoSdpError())
+                    continuation.resume(throwing: NoSdpError())
+                    return
                 }
                 
-                continuation.yield(.init(from: sdp))
-                continuation.finish()
+                continuation.resume(returning: .init(from: sdp))
             }
         }
     }
     
-    func setLocalDescription(sessionDescription: WebRTCClient.SessionDescription) -> AsyncThrowingStream<WebRTCClient.SessionDescription, Error> {
-        AsyncThrowingStream { continuation in
-            guard let peerConnection = peerConnection else {
-                struct NoPeerConnectionError: Error {}
-                return continuation.finish(throwing: NoPeerConnectionError())
-            }
-            
-            print(sessionDescription.rtcSessionDescription)
-            
-            peerConnection.setLocalDescription(sessionDescription.rtcSessionDescription) { error in
-                guard error == nil else {
-                    return continuation.finish(throwing: error)
-                }
-                
-                continuation.yield(sessionDescription)
-                continuation.finish()
-            }
-        }
-    }
-    
-    func localDescription() -> WebRTCClient.SessionDescription {
-        guard let localDescription = peerConnection?.localDescription else {
-            fatalError()
+    func setLocalDescription(_ sessionDescription: SessionDescription) async throws -> SessionDescription {
+        guard let peerConnection = peerConnection else {
+            struct NoPeerConnectionError: Error {}
+            throw NoPeerConnectionError()
         }
         
-        return WebRTCClient.SessionDescription.init(from: localDescription)
+        return try await withCheckedThrowingContinuation { continuation in
+            peerConnection.setLocalDescription(sessionDescription.rtcSessionDescription) { error in
+                if let error = error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                
+                continuation.resume(returning: sessionDescription)
+            }
+        }
+    }
+    
+    func localDescription() -> SessionDescription? {
+        guard let localDescription = peerConnection?.localDescription else {
+            return nil
+        }
+        
+        return SessionDescription(from: localDescription)
     }
     
     func transceivers() -> [RTCRtpTransceiver] {
         guard let peerConnection = peerConnection else {
-            fatalError()
+            return []
         }
                     
         return peerConnection.transceivers
     }
     
-    func setRemoteDescription(sessionDescription: WebRTCClient.SessionDescription) -> AsyncThrowingStream<WebRTCClient.SessionDescription, Error> {
-        AsyncThrowingStream { continuation in
-            guard let peerConnection = peerConnection else {
-                struct NoPeerConnectionError: Error {}
-                return continuation.finish(throwing: NoPeerConnectionError())
-            }
-            
+    func localTransceivers() -> [String: RTCRtpTransceiver] {
+        return localTransceivers
+    }
+    
+    func setRemoteDescription(_ sessionDescription: SessionDescription) async throws -> SessionDescription {
+        guard let peerConnection = peerConnection else {
+            struct NoPeerConnectionError: Error {}
+            throw NoPeerConnectionError()
+        }
+        
+        return try await withCheckedThrowingContinuation { continuation in
             peerConnection.setRemoteDescription(sessionDescription.rtcSessionDescription) { error in
-                guard error == nil else {
-                    return continuation.finish(throwing: error)
+                if let error = error {
+                    continuation.resume(throwing: error)
+                    return
                 }
                 
-                continuation.yield(sessionDescription)
-                continuation.finish()
+                continuation.resume(returning: sessionDescription)
             }
         }
     }
@@ -353,8 +289,8 @@ private actor Client: NSObject {
         let rtcPixelBuffer = RTCCVPixelBuffer(pixelBuffer: pixelBuffer)
         let timeStampNs = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sampleBuffer)) * Float64(NSEC_PER_SEC)
         let videoFrame = RTCVideoFrame(buffer: rtcPixelBuffer,
-                                     rotation: RTCVideoRotation._90,
-                                     timeStampNs: Int64(timeStampNs))
+                                      rotation: RTCVideoRotation._90,
+                                      timeStampNs: Int64(timeStampNs))
         
         videoSource!.capturer(videoCapturer!, didCapture: videoFrame)
     }
@@ -378,14 +314,14 @@ private actor Client: NSObject {
         let rtcPixelBuffer = RTCCVPixelBuffer(pixelBuffer: pixelBuffer)
         let timeStampNs = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sampleBuffer)) * Float64(NSEC_PER_SEC)
         let videoFrame = RTCVideoFrame(buffer: rtcPixelBuffer,
-                                     rotation: RTCVideoRotation._0,  // Keep original orientation
-                                     timeStampNs: Int64(timeStampNs))
+                                      rotation: RTCVideoRotation._0,  // Keep original orientation
+                                      timeStampNs: Int64(timeStampNs))
         
         screenShareSource!.capturer(screenShareCapturer!, didCapture: videoFrame)
     }
 }
 
-final class PeerConnectionDelegate: NSObject, RTCPeerConnectionDelegate  {
+class PeerConnectionDelegate: NSObject, RTCPeerConnectionDelegate {
     func peerConnection(_ peerConnection: RTCPeerConnection, didChange stateChanged: RTCSignalingState) {
         print("peerConnection new signaling state: \(stateChanged)")
     }

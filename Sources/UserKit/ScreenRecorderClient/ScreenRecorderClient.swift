@@ -1,44 +1,19 @@
 //
-//  File.swift
-//  
+//  ScreenRecorderClient.swift
+//  UserKit
 //
-//  Created by Peter Nicholls on 16/9/2024.
+//  Created by Peter Nicholls on 4/3/2025.
 //
 
-import Foundation
-import Dependencies
-import DependenciesMacros
 import ReplayKit
 
-public struct ScreenRecorderClient {
-    public var start: @Sendable () async -> AsyncThrowingStream<Buffer, Error> = { .finished() }
-}
-
-extension ScreenRecorderClient {
-    public struct Buffer {
+actor ScreenRecorderClient {
+    struct Buffer {
         let sampleBuffer: CMSampleBuffer
         let bufferType: RPSampleBufferType
     }
-}
-
-extension ScreenRecorderClient: DependencyKey {
-    public static var liveValue: ScreenRecorderClient {
-        let client = Client()
-        return ScreenRecorderClient(start: {
-            await client.start()
-        })
-    }
-}
-
-extension DependencyValues {
-    public var screenRecorderClient: ScreenRecorderClient {
-        get { self[ScreenRecorderClient.self] }
-        set { self[ScreenRecorderClient.self] = newValue }
-    }
-}
-
-private actor Client {
-    func start() -> AsyncThrowingStream<ScreenRecorderClient.Buffer, Error> {
+    
+    func start() async -> AsyncThrowingStream<Buffer, Error> {
         AsyncThrowingStream { continuation in
             Task { @MainActor in
                 let recorder = RPScreenRecorder.shared()
