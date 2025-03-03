@@ -84,7 +84,17 @@ public struct Call {
             case .alert(.presented(.continue)):
                 state.pictureInPicture = .init(state: .starting, videoTrack: nil)
                 state.alert = nil
-                return .none
+                return .run { [state] send in
+                    let transceivers = await webRTCClient.transceivers()
+                    
+                    for participant in state.participants.filter({ $0.role == .host }) {
+                        for track in participant.tracks.filter({ $0.type == .video && $0.mid != nil && $0.pullState == .pulled }) {
+                            if let videoTrack = transceivers.filter({ $0.mediaType == .video }).first(where: { $0.mid == track.mid })?.receiver.track as? RTCVideoTrack {
+                                await send(.pictureInPicture(.setVideoTrack(videoTrack)))
+                            }
+                        }
+                    }
+                }
                 
             case .alert(.presented(.decline)):
                 guard let participant = state.participants.first(where: { $0.role == .user }) else {
@@ -164,44 +174,57 @@ public struct Call {
                 
                 switch track.type {
                 case .screenShare:
- //                    let videoTrack = state.participants.flatMap { $0.tracks.compactMap { $0.receiver?.track } }.first as? RTCVideoTrack
                     state.pictureInPicture = .init(state: .starting, videoTrack: nil)
                 default:
                     break
                 }
                 
-                return .run { [state] send in
-                    guard let participant = state.participants.first(where: { $0.role == .user }), participant.state == .joined else {
-                        return
-                    }
-                    
-                    let tracks: [[String: Any]] = await webRTCClient.localTransceivers().map { type, transceiver in
-                        let transceiverTrackId = transceiver.sender.track!.trackId
-                        let trackState = state.participants[id: participantId]?.tracks[id: transceiverTrackId]
-                        
-                        return [
-                            "id": "\(state.sessionId!)/\(transceiverTrackId)",
-                            "type": type,
-                            "state": transceiverTrackId == trackId ? "active" : (trackState?.state.rawValue ?? "inactive")
-                        ]
-                    }
-                    
-                    let data: [String: Any] = [
-                        "state": participant.state.rawValue,
-                        "transceiverSessionId": state.sessionId!,
-                        "tracks": tracks
-                    ]
-                    
-                    let participantUpdate: [String: Any] = [
-                        "type": "participantUpdate",
-                        "participant": data
-                    ]
-                    
-                    let jsonData = try JSONSerialization.data(withJSONObject: participantUpdate, options: .prettyPrinted)
-                    if let jsonString = String(data: jsonData, encoding: .utf8) {
-                        try await webSocketClient.send(id: WebSocketClient.ID(), message: .string(jsonString))
-                    }
-                }
+                return
+                    .merge(
+                        .run { [state] send in
+                            let transceivers = await webRTCClient.transceivers()
+                            
+                            for participant in state.participants.filter({ $0.role == .host }) {
+                                for track in participant.tracks.filter({ $0.type == .video && $0.mid != nil && $0.pullState == .pulled }) {
+                                    if let videoTrack = transceivers.filter({ $0.mediaType == .video }).first(where: { $0.mid == track.mid })?.receiver.track as? RTCVideoTrack {
+                                        await send(.pictureInPicture(.setVideoTrack(videoTrack)))
+                                    }
+                                }
+                            }
+                        },
+                        .run { [state] send in
+                            guard let participant = state.participants.first(where: { $0.role == .user }), participant.state == .joined else {
+                                return
+                            }
+                            
+                            let tracks: [[String: Any]] = await webRTCClient.localTransceivers().map { type, transceiver in
+                                let transceiverTrackId = transceiver.sender.track!.trackId
+                                let trackState = state.participants[id: participantId]?.tracks[id: transceiverTrackId]
+                                
+                                return [
+                                    "id": "\(state.sessionId!)/\(transceiverTrackId)",
+                                    "type": type,
+                                    "state": transceiverTrackId == trackId ? "active" : (trackState?.state.rawValue ?? "inactive")
+                                ]
+                            }
+                            
+                            let data: [String: Any] = [
+                                "state": participant.state.rawValue,
+                                "transceiverSessionId": state.sessionId!,
+                                "tracks": tracks
+                            ]
+                            
+                            let participantUpdate: [String: Any] = [
+                                "type": "participantUpdate",
+                                "participant": data
+                            ]
+                            
+                            let jsonData = try JSONSerialization.data(withJSONObject: participantUpdate, options: .prettyPrinted)
+                            if let jsonString = String(data: jsonData, encoding: .utf8) {
+                                try await webSocketClient.send(id: WebSocketClient.ID(), message: .string(jsonString))
+                            }
+                        }
+                    )
                                                 
             case .participants:
                 return .none
@@ -246,7 +269,7 @@ public struct Call {
                             try await webSocketClient.send(id: WebSocketClient.ID(), message: .string(jsonString))
                         }
                     },
-                    .send(.webRTC(.push))
+                    .send(.webRTC(.pull))
                 )
                 
             case .webRTC(.push):
@@ -256,59 +279,63 @@ public struct Call {
                 }
                 
                 return .run { [state] send in
-                    for try await offer in await webRTCClient.offer() {
-                        for try await sessionDescription in await webRTCClient.setLocalDescription(offer) {
-                            let transceivers = await webRTCClient.localTransceivers()
-                            
-                            let tracks = transceivers.map { type, transceiver in
-                                APIClient.PushTracksRequest.Track(
-                                    location: "local",
-                                    trackName: transceiver.sender.track!.trackId,
-                                    mid: transceiver.mid
+                    do {
+                        for try await offer in await webRTCClient.offer() {
+                            for try await sessionDescription in await webRTCClient.setLocalDescription(offer) {
+                                let transceivers = await webRTCClient.localTransceivers()
+                                
+                                let tracks = transceivers.map { type, transceiver in
+                                    APIClient.PushTracksRequest.Track(
+                                        location: "local",
+                                        trackName: transceiver.sender.track!.trackId,
+                                        mid: transceiver.mid
+                                    )
+                                }
+                                
+                                guard !tracks.isEmpty else {
+                                    return
+                                }
+                                
+                                let response = try await apiClient.request(
+                                    endpoint: .pushTracks(sessionId, .init(sessionDescription: .init(sdp: sessionDescription.sdp, type: "offer"), tracks: tracks)),
+                                    as: APIClient.PushTracksResponse.self
                                 )
-                            }
-                            
-                            guard !tracks.isEmpty else {
-                                return
-                            }
-                            
-                            let response = try await apiClient.request(
-                                endpoint: .pushTracks(sessionId, .init(sessionDescription: .init(sdp: sessionDescription.sdp, type: "offer"), tracks: tracks)),
-                                as: APIClient.PushTracksResponse.self
-                            )
-                            
-                            await webRTCClient.setRemoteDescription(.init(sdp: response.sessionDescription.sdp, type: .answer))
-                            
-                            guard let participant = state.participants.first(where: { $0.role == .user }) else {
-                                return
-                            }
-                            
-                            let localTracks: [[String: Any]] = await webRTCClient.localTransceivers().map { type, transceiver in
-                                [
-                                    "id": "\(state.sessionId!)/\(transceiver.sender.track!.trackId)",
-                                    "type": type,
-                                    "state": "inactive"
+                                
+                                await webRTCClient.setRemoteDescription(.init(sdp: response.sessionDescription.sdp, type: .answer))
+                                
+                                guard let participant = state.participants.first(where: { $0.role == .user }) else {
+                                    return
+                                }
+                                
+                                let localTracks: [[String: Any]] = await webRTCClient.localTransceivers().map { type, transceiver in
+                                    [
+                                        "id": "\(state.sessionId!)/\(transceiver.sender.track!.trackId)",
+                                        "type": type,
+                                        "state": "inactive"
+                                    ]
+                                }
+                                
+                                let data: [String: Any] = [
+                                    "state": participant.state.rawValue,
+                                    "transceiverSessionId": state.sessionId!,
+                                    "tracks": localTracks
                                 ]
-                            }
-                            
-                            let data: [String: Any] = [
-                                "state": participant.state.rawValue,
-                                "transceiverSessionId": state.sessionId!,
-                                "tracks": localTracks
-                            ]
-                            
-                            let participantUpdate: [String: Any] = [
-                                "type": "participantUpdate",
-                                "participant": data
-                            ]
-                            
-                            let jsonData = try JSONSerialization.data(withJSONObject: participantUpdate, options: .prettyPrinted)
-                            if let jsonString = String(data: jsonData, encoding: .utf8) {
-                                try await webSocketClient.send(id: WebSocketClient.ID(), message: .string(jsonString))
-                            }
+                                
+                                let participantUpdate: [String: Any] = [
+                                    "type": "participantUpdate",
+                                    "participant": data
+                                ]
+                                
+                                let jsonData = try JSONSerialization.data(withJSONObject: participantUpdate, options: .prettyPrinted)
+                                if let jsonString = String(data: jsonData, encoding: .utf8) {
+                                    try await webSocketClient.send(id: WebSocketClient.ID(), message: .string(jsonString))
+                                }
 
-                            await send(.webRTC(.pull))
+                                await send(.webRTC(.pull))
+                            }
                         }
+                    } catch let error {
+                        print("Failed to push tracks: \(error)")
                     }
                 }
                 
