@@ -37,7 +37,6 @@ public struct Participant {
     public enum Action {
         case `init`
         case pullTracks
-        case setReceiver(String, RTCRtpReceiver)
         case tracks(IdentifiedActionOf<Track>)
         case update(User.State.WebSocket.Message.UserState.Call.Participant)
     }
@@ -50,11 +49,7 @@ public struct Participant {
                 
             case .pullTracks:
                 return .none
-                
-            case .setReceiver(let trackId, let receiver):
-                state.tracks[id: trackId]?.receiver = receiver
-                return .none
-                
+                                
             case .tracks:
                 return .none
                 

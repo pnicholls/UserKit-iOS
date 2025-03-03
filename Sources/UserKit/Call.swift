@@ -64,7 +64,7 @@ public struct Call {
                 guard let participant = state.participants.first(where: { $0.role == .user }) else {
                     return .none
                 }
-
+                
                 state.participants[id: participant.id]?.state = .joined
                 
                 switch state.sessionId {
@@ -82,8 +82,7 @@ public struct Call {
                 }
                 
             case .alert(.presented(.continue)):
-                let videoTrack = state.participants.flatMap { $0.tracks.compactMap { $0.receiver?.track } }.first as? RTCVideoTrack
-                state.pictureInPicture = .init(state: .starting, videoTrack: videoTrack)
+                state.pictureInPicture = .init(state: .starting, videoTrack: nil)
                 state.alert = nil
                 return .none
                 
@@ -91,7 +90,7 @@ public struct Call {
                 guard let participant = state.participants.first(where: { $0.role == .user }) else {
                     return .none
                 }
-
+                
                 state.participants[id: participant.id]?.state = .declined
                 return .none
                 
@@ -105,13 +104,13 @@ public struct Call {
             case .alert(.dismiss):
                 state.alert = nil
                 return .none
-                                                                
+                
             case .apiClient(.postSessionResponse(.failure(_))):
                 return .none
-            
+                
             case .apiClient(.postSessionResponse(.success(let response))):
                 state.sessionId = response.sessionId
-
+                
                 guard let participant = state.participants.first(where: { $0.role == .user }) else {
                     return .none
                 }
@@ -129,14 +128,14 @@ public struct Call {
                 default:
                     return .none
                 }
-                                                
+                
             case .appeared:
                 return .run { send in
                     await send(.apiClient(.postSessionResponse(Result {
                         try await apiClient.request(endpoint: .postSession(.init()), as: APIClient.PostSessionResponse.self)
                     })))
                 }
-                                                
+                
             case .participants(.element(id: let participantId, action: .tracks(.element(id: let trackId, action: .request)))):
                 guard let track = state.participants[id: participantId]?.tracks[id: trackId] else {
                     return .none
@@ -154,7 +153,7 @@ public struct Call {
                 default:
                     break
                 }
-
+                
                 return .none
                 
             case .participants(.element(id: let participantId, action: .tracks(.element(id: let trackId, action: .requestAccepted)))):
@@ -165,12 +164,12 @@ public struct Call {
                 
                 switch track.type {
                 case .screenShare:
-                    let videoTrack = state.participants.flatMap { $0.tracks.compactMap { $0.receiver?.track } }.first as? RTCVideoTrack
-                    state.pictureInPicture = .init(state: .starting, videoTrack: videoTrack)
+ //                    let videoTrack = state.participants.flatMap { $0.tracks.compactMap { $0.receiver?.track } }.first as? RTCVideoTrack
+                    state.pictureInPicture = .init(state: .starting, videoTrack: nil)
                 default:
                     break
                 }
-
+                
                 return .run { [state] send in
                     guard let participant = state.participants.first(where: { $0.role == .user }), participant.state == .joined else {
                         return
@@ -192,32 +191,21 @@ public struct Call {
                         "transceiverSessionId": state.sessionId!,
                         "tracks": tracks
                     ]
-
+                    
                     let participantUpdate: [String: Any] = [
                         "type": "participantUpdate",
                         "participant": data
                     ]
-
+                    
                     let jsonData = try JSONSerialization.data(withJSONObject: participantUpdate, options: .prettyPrinted)
                     if let jsonString = String(data: jsonData, encoding: .utf8) {
                         try await webSocketClient.send(id: WebSocketClient.ID(), message: .string(jsonString))
                     }
                 }
-                
-            case .participants(.element(id: let participantId, action: .tracks(.element(id: _, action: .pull)))):
-                return .none
-                
-            case .participants(.element(id: let id, action: .setReceiver(let trackId, let receiver))):
-                guard let track = state.participants[id: id]?.tracks[id: trackId], track.type == .video, let track = receiver.track as? RTCVideoTrack else {
-                    return .none
-                }
-                
-                state.pictureInPicture?.videoTrack = track
-                return .none
                                                 
             case .participants:
                 return .none
-                            
+                
             case .pictureInPicture(.restore):
                 state.pictureInPicture = nil
                 
@@ -252,13 +240,13 @@ public struct Call {
                 
             case .webRTC(.configure(.success)):
                 return .concatenate(
-                    .send(.webRTC(.push)),
                     .run { send in
                         let jsonData = try JSONSerialization.data(withJSONObject: ["type": "participantJoined"], options: .prettyPrinted)
                         if let jsonString = String(data: jsonData, encoding: .utf8) {
                             try await webSocketClient.send(id: WebSocketClient.ID(), message: .string(jsonString))
                         }
-                    }
+                    },
+                    .send(.webRTC(.push))
                 )
                 
             case .webRTC(.push):
@@ -266,7 +254,7 @@ public struct Call {
                     assertionFailure("Session ID must be set")
                     return .none
                 }
-                                                                        
+                
                 return .run { [state] send in
                     for try await offer in await webRTCClient.offer() {
                         for try await sessionDescription in await webRTCClient.setLocalDescription(offer) {
@@ -283,18 +271,18 @@ public struct Call {
                             guard !tracks.isEmpty else {
                                 return
                             }
-
+                            
                             let response = try await apiClient.request(
                                 endpoint: .pushTracks(sessionId, .init(sessionDescription: .init(sdp: sessionDescription.sdp, type: "offer"), tracks: tracks)),
                                 as: APIClient.PushTracksResponse.self
                             )
-
+                            
                             await webRTCClient.setRemoteDescription(.init(sdp: response.sessionDescription.sdp, type: .answer))
-
+                            
                             guard let participant = state.participants.first(where: { $0.role == .user }) else {
                                 return
                             }
-
+                            
                             let localTracks: [[String: Any]] = await webRTCClient.localTransceivers().map { type, transceiver in
                                 [
                                     "id": "\(state.sessionId!)/\(transceiver.sender.track!.trackId)",
@@ -308,124 +296,77 @@ public struct Call {
                                 "transceiverSessionId": state.sessionId!,
                                 "tracks": localTracks
                             ]
-
+                            
                             let participantUpdate: [String: Any] = [
                                 "type": "participantUpdate",
                                 "participant": data
                             ]
-
+                            
                             let jsonData = try JSONSerialization.data(withJSONObject: participantUpdate, options: .prettyPrinted)
                             if let jsonString = String(data: jsonData, encoding: .utf8) {
                                 try await webSocketClient.send(id: WebSocketClient.ID(), message: .string(jsonString))
                             }
 
-                            for participant in state.participants {
-                                for track in participant.tracks {
-                                    switch track.pullState {
-                                    case .notPulled, .failed(_):
-                                        await send(.participants(.element(id: participant.id, action: .tracks(.element(id: track.id, action: .pull)))))
-                                    default:
-                                        break
+                            await send(.webRTC(.pull))
+                        }
+                    }
+                }
+                
+            case .webRTC(.pull):
+                guard let sessionId = state.sessionId else {
+                    return .none
+                }
+                
+                var tracks: [APIClient.PullTracksRequest.Track] = []
+                state.participants.filter { $0.role == .host }.forEach { participant in
+                    guard let participantSessionId = participant.sessionId else {
+                        return
+                    }
+                    
+                    // TODO - Handle failed pullStates
+                    participant.tracks.filter { $0.pullState == .notPulled }.forEach { track in
+                        state.participants[id: participant.id]?.tracks[id: track.id]?.pullState = .pulling
+                        
+                        tracks.append(APIClient.PullTracksRequest.Track(
+                            location: "remote",
+                            trackName: track.id,
+                            sessionId: participantSessionId
+                        ))
+                    }
+                }
+                
+                guard !tracks.isEmpty else {
+                    return .none
+                }
+                
+                return .run { [state, tracks] send in
+                    let pullTracksResponse = try await apiClient.request(
+                        endpoint: .pullTracks(sessionId, .init(tracks: tracks)),
+                        as: APIClient.PullTracksResponse.self
+                    )
+                    
+                    if let sessionDescription = pullTracksResponse.sessionDescription, pullTracksResponse.requiresImmediateRenegotiation {
+                        for try await _ in await webRTCClient.setRemoteDescription(.init(sdp: sessionDescription.sdp, type: .offer)) {
+                            for try await sessionDescription in await webRTCClient.answer() {
+                                for try await sessionDescription in await webRTCClient.setLocalDescription(sessionDescription) {
+                                    let _ = try await apiClient.request(
+                                        endpoint: .renegotiate(sessionId, .init(sessionDescription: .init(sdp: sessionDescription.sdp, type: "answer"))),
+                                        as: APIClient.RenegotiateResponse.self
+                                    )
+                                    
+                                    for track in pullTracksResponse.tracks {
+                                        if let participant = state.participants.elements.first(where: { participant in
+                                            participant.tracks.map { $0.id }.contains(track.trackName)
+                                        }),
+                                           let participantTrack = participant.tracks.first(where: { $0.id == track.trackName }) {
+                                            await send(.participants(.element(id: participant.id, action: .tracks(.element(id: participantTrack.id, action: .pulled(track))))))
+                                        }
                                     }
                                 }
                             }
                         }
                     }
                 }
-                
-            case .webRTC(.pull):
-                return .none
-//                guard let sessionId = state.sessionId else {
-//                    return .none
-//                }
-//                
-//                var tracks: [APIClient.PullTracksRequest.Track] = []
-//                state.participants.filter { $0.role == .host }.forEach { participant in
-//                    guard let participantSessionId = participant.sessionId else {
-//                        return
-//                    }
-//                    
-//                    participant.tracks.filter { $0.pullState == .notPulled }.forEach { track in
-//                        state.participants[id: participant.id]?.tracks[id: track.id]?.pullState = .pulling
-//
-//                        tracks.append(APIClient.PullTracksRequest.Track(
-//                            location: "remote",
-//                            trackName: track.id,
-//                            sessionId: participantSessionId
-//                        ))
-//                    }
-//                }
-//                
-//                guard !tracks.isEmpty else {
-//                    return .none
-//                }
-                
-//                return .run {
-//                    let pullTracksResponse = try await apiClient.request(
-//                        endpoint: .pullTracks(sessionId, .init(tracks: tracks)),
-//                        as: APIClient.PullTracksResponse.self
-//                    )
-//                                    
-//                    pullTracksResponse.tracks.forEach { track in
-//                        let participant = state.participants.elements.first { participant in
-//                            participant.tracks.map { $0.id }.contains(track.trackName)
-//                        }
-//                        let participantTrack = participant?.tracks.first { $0.id == track.trackName }
-//                        guard let participant = participant, let participantTrack else {
-//                            return
-//                        }
-//                        state.participants[id: participant.id]?.tracks[id: participantTrack.id]?.mid = track.mid
-//                        
-//                        switch track.errorCode {
-//                        case .none:
-//                            state.participants[id: participant.id]?.tracks[id: participantTrack.id]?.pullState = .pulled
-//                        case .some(let errorCode):
-//                            state.participants[id: participant.id]?.tracks[id: participantTrack.id]?.pullState = .failed(.init(rawValue: errorCode) ?? .unknown)
-//                        }
-//                    }
-//      
-//                    if let sessionDescription = pullTracksResponse.sessionDescription, pullTracksResponse.requiresImmediateRenegotiation {
-//                        return .run { send in
-//                            for try await _ in await webRTCClient.setRemoteDescription(.init(sdp: sessionDescription.sdp, type: .offer)) {
-//                                for try await sessionDescription in await webRTCClient.answer() {
-//                                    for try await sessionDescription in await webRTCClient.setLocalDescription(sessionDescription) {
-//                                        
-//    //                                    return .merge(
-//    //                                        .run { [state] send in
-//    //                                            let transceivers = await webRTCClient.transceivers()
-//    //
-//    //                                            for participant in state.participants.filter({ $0.role == .host }).elements {
-//    //                                                for track in participant.tracks.elements {
-//    //                                                    if let receiver = transceivers.filter({ $0.mediaType == .video }).first(where: { $0.mid == track.mid })?.receiver {
-//    //                                                        await send(.participants(.element(id: participant.id, action: .setReceiver(track.id, receiver))))
-//    //                                                    }
-//    //                                                }
-//    //                                            }
-//    //                                        }
-//    //                                    )
-//                                        
-//                                        await send(.apiClient(.renegotiateResponse(Result {
-//                                            try await apiClient.request(endpoint: .renegotiate(sessionId, .init(sessionDescription: .init(sdp: sessionDescription.sdp, type: "answer"))), as: APIClient.RenegotiateResponse.self)
-//                                        })))
-//                                    }
-//                                }
-//                            }
-//                        }
-//                    }
-//                    
-//                    return .run { [participants = state.participants] send in
-//                        try await Task.sleep(nanoseconds: 3 * 1_000_000_000)
-//                        
-//                        for participant in participants {
-//                            for track in participant.tracks {
-//                                if case .failed(_) = track.pullState {
-//                                    await send(.participants(.element(id: participant.id, action: .tracks(.element(id: track.id, action: .pull)))))
-//                                }
-//                            }
-//                        }
-//                    }
-
-//                }
             }
         }
         .forEach(\.participants, action: \.participants) {
@@ -433,6 +374,21 @@ public struct Call {
         }
         .ifLet(\.pictureInPicture, action: \.pictureInPicture) {
             PictureInPicture()
+        }
+        .onChange(of: { $0.participants.filter { $0.role == .host }.map { $0.tracks } }) { oldValue, newValue in
+            Reduce { state, action in
+                .run { [state] send in
+                    let transceivers = await webRTCClient.transceivers()
+                    
+                    for participant in state.participants.filter({ $0.role == .host }) {
+                        for track in participant.tracks.filter({ $0.type == .video && $0.mid != nil && $0.pullState == .pulled }) {
+                            if let videoTrack = transceivers.filter({ $0.mediaType == .video }).first(where: { $0.mid == track.mid })?.receiver.track as? RTCVideoTrack {
+                                await send(.pictureInPicture(.setVideoTrack(videoTrack)))
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

@@ -20,6 +20,7 @@ public struct PictureInPicture {
     
     public enum Action: Equatable {
         case restore
+        case setVideoTrack(RTCVideoTrack)
         case start
         case started
         case stopped
@@ -29,6 +30,10 @@ public struct PictureInPicture {
         Reduce { state, action in
             switch action {
             case .restore:
+                return .none
+                
+            case .setVideoTrack(let videoTrack):
+                state.videoTrack = videoTrack
                 return .none
                 
             case .start:

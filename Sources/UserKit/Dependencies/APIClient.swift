@@ -201,7 +201,7 @@ extension APIClient {
         let tracks: [Track]
         let sessionDescription: SessionDescription?
         
-        struct Track: Codable, Equatable {
+        public struct Track: Codable, Equatable {
             let mid: String
             let trackName: String
             let sessionId: String

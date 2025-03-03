@@ -7,7 +7,6 @@
 
 import ComposableArchitecture
 import SwiftUI
-import WebRTC
 
 @Reducer
 public struct Track {
@@ -57,12 +56,12 @@ public struct Track {
         public var pushState: PushState
         public let type: TrackType
         public var mid: String?
-        public var receiver: RTCRtpReceiver?
     }
     
     public enum Action {
         case `init`
         case pull
+        case pulled(APIClient.PullTracksResponse.Track)
         case request
         case requestAccepted
         case requestRejected
@@ -99,6 +98,11 @@ public struct Track {
                 return .none
                 
             case .pull:
+                return .none
+                
+            case .pulled(let track):
+                state.pullState = .pulled
+                state.mid = track.mid
                 return .none
                 
             case .request:
