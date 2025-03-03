@@ -5,6 +5,13 @@
 //  Created by Peter Nicholls on 4/3/2025.
 //
 
+//
+//  WebRTCClient.swift
+//  UserKit
+//
+//  Created by Peter Nicholls on 4/3/2025.
+//
+
 import WebRTC
 
 actor WebRTCClient {
@@ -14,7 +21,7 @@ actor WebRTCClient {
     private var videoCapturer: RTCVideoCapturer?
     private var screenShareSource: RTCVideoSource?
     private var screenShareCapturer: RTCVideoCapturer?
-    private var localTransceivers: [String: RTCRtpTransceiver] = [:]
+    private var localTransceiversMap: [String: RTCRtpTransceiver] = [:]
     
     private static let factory: RTCPeerConnectionFactory = {
         RTCInitializeSSL()
@@ -107,7 +114,7 @@ actor WebRTCClient {
         let transceiverInit = RTCRtpTransceiverInit()
         transceiverInit.direction = .sendOnly
         
-        localTransceivers["audio"] = self.peerConnection?.addTransceiver(with: audioTrack, init: transceiverInit)
+        localTransceiversMap["audio"] = self.peerConnection?.addTransceiver(with: audioTrack, init: transceiverInit)
     }
     
     private func addVideoTrack() {
@@ -122,7 +129,7 @@ actor WebRTCClient {
             return
         }
         
-        localTransceivers["video"] = transceiver
+        localTransceiversMap["video"] = transceiver
         
         let parameters = transceiver.sender.parameters
         
@@ -148,7 +155,7 @@ actor WebRTCClient {
             return
         }
         
-        localTransceivers["screenShare"] = transceiver
+        localTransceiversMap["screenShare"] = transceiver
         
         let parameters = transceiver.sender.parameters
         
@@ -248,8 +255,9 @@ actor WebRTCClient {
         return peerConnection.transceivers
     }
     
-    func localTransceivers() -> [String: RTCRtpTransceiver] {
-        return localTransceivers
+    // Function that returns the stored local transceivers map
+    func getLocalTransceivers() -> [String: RTCRtpTransceiver] {
+        return localTransceiversMap
     }
     
     func setRemoteDescription(_ sessionDescription: SessionDescription) async throws -> SessionDescription {

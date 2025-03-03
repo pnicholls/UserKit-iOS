@@ -5,7 +5,15 @@
 //  Created by Peter Nicholls on 4/3/2025.
 //
 
+//
+//  CallManager.swift
+//  UserKit
+//
+//  Created by Peter Nicholls on 4/3/2025.
+//
+
 import SwiftUI
+import WebRTC
 
 @MainActor class CallManager: ObservableObject {
     private let apiClient: APIClient
@@ -18,6 +26,7 @@ import SwiftUI
     @Published var sessionId: String?
     
     private var callTask: Task<Void, Error>?
+    private var isInitialized = false
     
     struct AlertInfo {
         let title: String
@@ -31,31 +40,42 @@ import SwiftUI
         self.webSocketClient = webSocketClient
         self.alert = alert
         
-        initialize()
+        // Don't call initialize() in init - we'll call it explicitly
     }
     
-    private func initialize() {
+    func initialize() {
+        // Prevent multiple initializations
+        guard !isInitialized else { return }
+        isInitialized = true
+        
+        print("CallManager: Starting initialization")
+        
         callTask = Task {
             do {
+                print("CallManager: Requesting session")
                 let response = try await apiClient.request(
                     endpoint: .postSession(.init()),
                     as: APIClient.PostSessionResponse.self
                 )
                 
+                print("CallManager: Received session ID: \(response.sessionId)")
                 sessionId = response.sessionId
                 
                 // If user has already accepted, configure WebRTC
                 if let userParticipant = participants.first(where: { $0.role == .user }),
                    userParticipant.state == .joined {
+                    print("CallManager: User has already joined, configuring WebRTC")
                     try await configureWebRTC()
                 }
             } catch {
-                print("Failed to initialize call: \(error)")
+                print("CallManager: Failed to initialize call: \(error)")
+                isInitialized = false // Reset so we can try again
             }
         }
     }
     
     func acceptCall() async {
+        print("CallManager: Accepting call")
         alert = nil
         pictureInPicture = PictureInPictureManager()
         
@@ -64,18 +84,25 @@ import SwiftUI
             participants[index].state = .joined
             
             if sessionId != nil {
+                print("CallManager: Session exists, configuring WebRTC")
                 try? await configureWebRTC()
+            } else {
+                print("CallManager: No session ID yet, will configure when ready")
             }
+        } else {
+            print("CallManager: No user participant found")
         }
     }
     
     func declineCall() async {
+        print("CallManager: Declining call")
         if let index = participants.firstIndex(where: { $0.role == .user }) {
             participants[index].state = .declined
         }
     }
     
     func continueCall() async {
+        print("CallManager: Continuing call")
         pictureInPicture = PictureInPictureManager(state: .starting, videoTrack: nil)
         alert = nil
         
@@ -86,6 +113,7 @@ import SwiftUI
             for participant in participants.filter({ $0.role == .host }) {
                 for track in participant.tracks.filter({ $0.type == .video && $0.mid != nil && $0.pullState == .pulled }) {
                     if let videoTrack = transceivers.filter({ $0.mediaType == .video }).first(where: { $0.mid == track.mid })?.receiver.track as? RTCVideoTrack {
+                        print("CallManager: Setting video track for PiP")
                         await pictureInPicture?.setVideoTrack(videoTrack)
                     }
                 }
@@ -94,15 +122,18 @@ import SwiftUI
     }
     
     func endCall() async {
+        print("CallManager: Ending call")
         alert = nil
         
         Task {
             await webRTCClient.close()
+            isInitialized = false
             // Clean up other resources
         }
     }
     
     func updateParticipants(from participantsData: [[String: Any]]) async {
+        print("CallManager: Updating participants")
         for participantData in participantsData {
             guard let id = participantData["id"] as? String,
                   let roleString = participantData["role"] as? String,
@@ -125,6 +156,7 @@ import SwiftUI
                 }
             } else {
                 // Create new participant
+                print("CallManager: Creating new participant: \(id), role: \(role)")
                 let tracks: [TrackManager] = []
                 let newParticipant = ParticipantManager(
                     id: id,
@@ -146,16 +178,19 @@ import SwiftUI
     }
     
     private func configureWebRTC() async throws {
+        print("CallManager: Configuring WebRTC")
         do {
             try await webRTCClient.configure()
             await participantJoined()
             await pushTracks()
         } catch {
+            print("CallManager: Error configuring WebRTC: \(error)")
             throw error
         }
     }
     
     private func participantJoined() async {
+        print("CallManager: Sending participant joined message")
         do {
             let message: [String: Any] = ["type": "participantJoined"]
             let jsonData = try JSONSerialization.data(withJSONObject: message, options: .prettyPrinted)
@@ -163,21 +198,23 @@ import SwiftUI
                 try await webSocketClient.send(message: .string(jsonString))
             }
         } catch {
-            print("Failed to send participant joined message: \(error)")
+            print("CallManager: Failed to send participant joined message: \(error)")
         }
     }
     
     private func pushTracks() async {
         guard let sessionId = sessionId else {
-            assertionFailure("Session ID must be set")
+            print("CallManager: Cannot push tracks, session ID is not set")
             return
         }
+        
+        print("CallManager: Pushing tracks for session: \(sessionId)")
         
         do {
             let offer = try await webRTCClient.createOffer()
             let localDescription = try await webRTCClient.setLocalDescription(offer)
             
-            let transceivers = await webRTCClient.localTransceivers()
+            let transceivers = await webRTCClient.getLocalTransceivers()
             
             let tracks = transceivers.map { type, transceiver in
                 APIClient.PushTracksRequest.Track(
@@ -187,7 +224,12 @@ import SwiftUI
                 )
             }
             
-            guard !tracks.isEmpty else { return }
+            guard !tracks.isEmpty else {
+                print("CallManager: No local tracks to push")
+                return
+            }
+            
+            print("CallManager: Pushing \(tracks.count) tracks")
             
             let response = try await apiClient.request(
                 endpoint: .pushTracks(sessionId, .init(
@@ -197,12 +239,15 @@ import SwiftUI
                 as: APIClient.PushTracksResponse.self
             )
             
-            await webRTCClient.setRemoteDescription(.init(sdp: response.sessionDescription.sdp, type: .answer))
+            try await webRTCClient.setRemoteDescription(.init(sdp: response.sessionDescription.sdp, type: .answer))
             
             // Update tracks for user participant
-            guard let participant = participants.first(where: { $0.role == .user }) else { return }
+            guard let participant = participants.first(where: { $0.role == .user }) else {
+                print("CallManager: No user participant found")
+                return
+            }
             
-            let localTracks: [[String: Any]] = await webRTCClient.localTransceivers().map { type, transceiver in
+            let localTracks: [[String: Any]] = await webRTCClient.getLocalTransceivers().map { type, transceiver in
                 [
                     "id": "\(sessionId)/\(transceiver.sender.track!.trackId)",
                     "type": type,
@@ -228,18 +273,24 @@ import SwiftUI
             
             await pullTracks()
         } catch {
-            print("Failed to push tracks: \(error)")
+            print("CallManager: Failed to push tracks: \(error)")
         }
     }
     
     private func pullTracks() async {
-        guard let sessionId = sessionId else { return }
+        guard let sessionId = sessionId else {
+            print("CallManager: Cannot pull tracks, session ID is not set")
+            return
+        }
         
         var tracks: [APIClient.PullTracksRequest.Track] = []
         
         // Find tracks to pull
         for participant in participants.filter({ $0.role == .host }) {
-            guard let participantSessionId = participant.sessionId else { continue }
+            guard let participantSessionId = participant.sessionId else {
+                print("CallManager: Host participant has no session ID")
+                continue
+            }
             
             for track in participant.tracks.filter({ $0.pullState == .notPulled }) {
                 track.pullState = .pulling
@@ -252,7 +303,12 @@ import SwiftUI
             }
         }
         
-        guard !tracks.isEmpty else { return }
+        guard !tracks.isEmpty else {
+            print("CallManager: No tracks to pull")
+            return
+        }
+        
+        print("CallManager: Pulling \(tracks.count) tracks")
         
         do {
             let pullTracksResponse = try await apiClient.request(
@@ -263,7 +319,8 @@ import SwiftUI
             if let sessionDescription = pullTracksResponse.sessionDescription,
                pullTracksResponse.requiresImmediateRenegotiation {
                 
-                await webRTCClient.setRemoteDescription(.init(sdp: sessionDescription.sdp, type: .offer))
+                print("CallManager: Renegotiation required")
+                try await webRTCClient.setRemoteDescription(.init(sdp: sessionDescription.sdp, type: .offer))
                 let answer = try await webRTCClient.createAnswer()
                 let localDescription = try await webRTCClient.setLocalDescription(answer)
                 
@@ -278,6 +335,7 @@ import SwiftUI
                 for track in pullTracksResponse.tracks {
                     for participant in participants {
                         if let trackIndex = participant.tracks.firstIndex(where: { $0.id == track.trackName }) {
+                            print("CallManager: Track pulled successfully: \(track.trackName)")
                             participant.tracks[trackIndex].pullState = .pulled
                             participant.tracks[trackIndex].mid = track.mid
                         }
@@ -285,7 +343,7 @@ import SwiftUI
                 }
             }
         } catch {
-            print("Failed to pull tracks: \(error)")
+            print("CallManager: Failed to pull tracks: \(error)")
         }
     }
 }

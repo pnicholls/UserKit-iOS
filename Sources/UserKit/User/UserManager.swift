@@ -31,26 +31,33 @@ import SwiftUI
         self.apiClient = apiClient
         self.webRTCClient = webRTCClient
         self.webSocketClient = WebSocketClient()
+        
+        print("UserManager: Initialized")
     }
     
     func initialize() async {
+        print("UserManager: Starting initialization")
         await connectWebSocket()
     }
     
     private func connectWebSocket() async {
         guard webSocketState == .disconnected else {
+            print("UserManager: WebSocket already connecting or connected")
             if let task = webSocketTask {
                 task.cancel()
             }
             return
         }
         
+        print("UserManager: Connecting to WebSocket")
         webSocketState = .connecting
         
         webSocketTask = Task {
             do {
+                print("UserManager: Attempting WebSocket connection to \(webSocketURL)")
                 let socket = try await webSocketClient.connect(to: webSocketURL, with: [])
                 webSocketState = .connected
+                print("UserManager: WebSocket connected")
                 
                 // Launch a heartbeat task
                 Task {
@@ -65,10 +72,11 @@ import SwiftUI
                     await handleWebSocketMessage(message)
                 }
                 
+                print("UserManager: WebSocket disconnected")
                 webSocketState = .disconnected
             } catch {
                 webSocketState = .disconnected
-                print("WebSocket connection failed: \(error)")
+                print("UserManager: WebSocket connection failed: \(error)")
             }
         }
     }
@@ -76,12 +84,14 @@ import SwiftUI
     private func handleWebSocketMessage(_ message: URLSessionWebSocketTask.Message) async {
         do {
             guard case .string(let messageString) = message else {
-                print("Unexpected data received")
+                print("UserManager: Unexpected data received")
                 return
             }
             
             let decoder = JSONDecoder()
             guard let data = messageString.data(using: .utf8) else { return }
+            
+            print("UserManager: Received WebSocket message: \(messageString)")
             
             // Decode the message - simplified for now, add error handling as needed
             if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -90,49 +100,58 @@ import SwiftUI
                 switch messageType {
                 case "user-socket-pong":
                     // Handle pong - no action needed
+                    print("UserManager: Received pong")
                     break
                     
                 case "userState":
+                    print("UserManager: Received userState update")
                     if let stateData = json["state"] as? [String: Any],
                        let callData = stateData["call"] as? [String: Any] {
                         await updateCallState(from: callData)
                     } else if call != nil {
                         // Call ended
+                        print("UserManager: Call ended")
                         await endCall()
                     }
                     
                 default:
-                    print("Unknown message type: \(messageType)")
+                    print("UserManager: Unknown message type: \(messageType)")
                 }
             }
         } catch {
-            print("Failed to decode WebSocket message: \(error)")
+            print("UserManager: Failed to decode WebSocket message: \(error)")
         }
     }
     
     private func updateCallState(from callData: [String: Any]) async {
+        print("UserManager: Updating call state")
+        
         // Create or update call manager
         if call == nil {
             // Create new call with an alert
+            print("UserManager: Creating new CallManager")
             call = CallManager(
                 apiClient: apiClient,
                 webRTCClient: webRTCClient,
                 webSocketClient: webSocketClient,
-                alert: AlertInfo(
+                alert: CallManager.AlertInfo(
                     title: "Luke Longworth would like to start a call",
                     acceptText: "Accept",
                     declineText: "Decline"
                 )
             )
+            // Note: We no longer call initialize() here - it will be called by CallView
         }
         
         // Update participants if present
         if let participantsData = callData["participants"] as? [[String: Any]] {
+            print("UserManager: Updating participants in call")
             await call?.updateParticipants(from: participantsData)
         }
     }
     
     private func endCall() async {
+        print("UserManager: Ending call and cleaning up resources")
         await webRTCClient.close()
         // Stop other services as needed
         call = nil

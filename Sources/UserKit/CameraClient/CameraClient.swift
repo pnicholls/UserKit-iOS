@@ -5,11 +5,45 @@
 //  Created by Peter Nicholls on 4/3/2025.
 //
 
+//
+//  CameraClient.swift
+//  UserKit
+//
+//  Created by Peter Nicholls on 4/3/2025.
+//
+
+//
+//  CameraClient.swift
+//  UserKit
+//
+//  Created by Peter Nicholls on 4/3/2025.
+//
+
 import AVKit
 
+// Helper class to handle camera delegate callbacks - moved outside the actor
+class CameraBufferDelegate: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
+    let handler: (CMSampleBuffer, AVCaptureConnection) -> Void
+    
+    init(handler: @escaping (CMSampleBuffer, AVCaptureConnection) -> Void) {
+        self.handler = handler
+        super.init()
+    }
+    
+    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+        handler(sampleBuffer, connection)
+    }
+}
+
 actor CameraClient {
-    private var captureSession: AVCaptureSession?
-    private var videoDataOutput: AVCaptureVideoDataOutput?
+    // These properties need to be accessible from MainActor context
+    // but still protected by the actor isolation
+    private var _captureSession: AVCaptureSession?
+    private var _videoDataOutput: AVCaptureVideoDataOutput?
+    
+    // Create a nonisolated delegate to maintain actor isolation
+    private var bufferDelegate: CameraBufferDelegate?
+    
     private let captureQueue = DispatchQueue(label: "com.camera.capture")
     
     struct Buffer {
@@ -47,12 +81,21 @@ actor CameraClient {
     }
     
     private func setupCamera(handler: @escaping (Buffer) -> Void) async {
-        // Run on main thread for UI-related capture session setup
+        // Create the required objects within the actor context
+        let session = AVCaptureSession()
+        session.sessionPreset = .high
+        
+        // Store the local references
+        _captureSession = session
+        
+        // Create an isolated delegate for the buffer
+        let bufferDelegate = CameraBufferDelegate { buffer, connection in
+            handler(Buffer(sampleBuffer: buffer, connection: connection))
+        }
+        self.bufferDelegate = bufferDelegate
+        
+        // Now perform UI-related setup on the main thread
         await MainActor.run {
-            // Initialize capture session
-            let session = AVCaptureSession()
-            session.sessionPreset = .high
-            
             // Get front camera device
             guard let device = AVCaptureDevice.default(.builtInWideAngleCamera,
                                                       for: .video,
@@ -73,10 +116,8 @@ actor CameraClient {
             // Setup video data output
             let dataOutput = AVCaptureVideoDataOutput()
             dataOutput.setSampleBufferDelegate(
-                CameraBufferDelegate { buffer, connection in
-                    handler(Buffer(sampleBuffer: buffer, connection: connection))
-                },
-                queue: captureQueue
+                bufferDelegate,
+                queue: self.captureQueue
             )
             dataOutput.videoSettings = [
                 kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
@@ -87,36 +128,33 @@ actor CameraClient {
                 session.addOutput(dataOutput)
             }
             
-            // Store references
-            self.captureSession = session
-            self.videoDataOutput = dataOutput
+            // Store the output reference in the actor
+            Task {
+                await self.setVideoDataOutput(dataOutput)
+            }
             
-            // Start capture
+            // Start the capture session
             if !session.isRunning {
                 session.startRunning()
             }
         }
     }
     
+    private func setVideoDataOutput(_ output: AVCaptureVideoDataOutput) {
+        _videoDataOutput = output
+    }
+    
     private func stopCapture() async {
-        // Run on main thread for UI-related capture session teardown
+        // Get a local reference to the capture session inside the actor
+        guard let session = _captureSession else { return }
+        
+        // Perform the UI operation on the main thread
         await MainActor.run {
-            guard let session = captureSession, session.isRunning else { return }
-            session.stopRunning()
+            if session.isRunning {
+                session.stopRunning()
+            }
         }
     }
     
-    // Helper class to handle camera delegate callbacks
-    class CameraBufferDelegate: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
-        let handler: (CMSampleBuffer, AVCaptureConnection) -> Void
-        
-        init(handler: @escaping (CMSampleBuffer, AVCaptureConnection) -> Void) {
-            self.handler = handler
-            super.init()
-        }
-        
-        func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-            handler(sampleBuffer, connection)
-        }
-    }
+    // The CameraBufferDelegate class has been moved outside the actor
 }

@@ -9,6 +9,7 @@ import SwiftUI
 
 struct CallView: View {
     @ObservedObject var callManager: CallManager
+    @State private var isInitialized = false
     
     var body: some View {
         VStack {
@@ -17,8 +18,15 @@ struct CallView: View {
             }
         }
         .onAppear {
-            Task {
-                await callManager.initialize()
+            // Ensure we only initialize once
+            if !isInitialized {
+                isInitialized = true
+                print("CallView: Appearing, initializing CallManager")
+                Task {
+                    callManager.initialize()
+                }
+            } else {
+                print("CallView: Appearing, CallManager already initialized")
             }
         }
         .alert(
@@ -43,4 +51,3 @@ struct CallView: View {
         }
     }
 }
-

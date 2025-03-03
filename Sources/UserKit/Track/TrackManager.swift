@@ -119,7 +119,7 @@ import SwiftUI
             
             Task {
                 for try await buffer in videoStream {
-                    await webRTCClient.handleVideoSourceBuffer(buffer.sampleBuffer)
+                    await webRTCClient.handleVideoSourceBuffer(sampleBuffer: buffer.sampleBuffer)
                 }
             }
             
@@ -139,7 +139,7 @@ import SwiftUI
                 do {
                     let stream = await screenRecorderClient.start()
                     for try await buffer in stream {
-                        await webRTCClient.handleScreenShareSourceBuffer(buffer.sampleBuffer)
+                        await webRTCClient.handleScreenShareSourceBuffer(sampleBuffer: buffer.sampleBuffer)
                     }
                 } catch {
                     // Handle errors
