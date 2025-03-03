@@ -8,6 +8,7 @@
 import AVKit
 import SwiftUI
 import WebRTC
+import Combine
 
 // Helper function to create an async timer stream
 func timerStream(interval: TimeInterval) -> AsyncStream<Date> {
@@ -25,11 +26,14 @@ func timerStream(interval: TimeInterval) -> AsyncStream<Date> {
     }
 }
 
+
+
 final class PictureInPictureViewController: UIViewController {
     
     // MARK: - Properties
 
     private let manager: PictureInPictureManager
+    private var cancellables = Set<AnyCancellable>()
     
     private lazy var pictureInPictureVideoCallViewController: PictureInPictureVideoCallViewController = {
         let pictureInPictureVideoCallViewController = PictureInPictureVideoCallViewController()
@@ -67,6 +71,7 @@ final class PictureInPictureViewController: UIViewController {
         pictureInPictureController?.delegate = self
         
         setupManagerObservation()
+        setupTrackObservation()
     }
     
     private func setupManagerObservation() {
@@ -87,20 +92,41 @@ final class PictureInPictureViewController: UIViewController {
         }
     }
     
+    private func setupTrackObservation() {
+        // Set the initial video track if it exists
+        if let track = manager.videoTrack {
+            print("PiP Controller: Adding initial video track to view")
+            attachTrackToView(track)
+        }
+        
+        // Use Combine to observe track changes
+        manager.trackChanged
+            .receive(on: RunLoop.main)
+            .sink { [weak self] track in
+                print("PiP Controller: Track changed notification received")
+                self?.attachTrackToView(track)
+            }
+            .store(in: &cancellables)
+    }
+    
+    private func attachTrackToView(_ track: RTCVideoTrack) {
+        print("PiP Controller: Attaching track to view")
+        track.add(pictureInPictureVideoCallViewController.videoView)
+    }
+    
     private func updateUI() {
         switch manager.state {
         case .starting where !(pictureInPictureController?.isPictureInPictureActive ?? false):
+            print("PiP Controller: Starting PiP")
             pictureInPictureController?.startPictureInPicture()
         case .started where !(pictureInPictureController?.isPictureInPictureActive ?? false):
+            print("PiP Controller: Starting PiP (from started state)")
             pictureInPictureController?.startPictureInPicture()
         case .stopped:
+            print("PiP Controller: Stopping PiP")
             pictureInPictureController?.stopPictureInPicture()
         default:
             break
-        }
-                    
-        if let track = manager.videoTrack {
-            track.add(pictureInPictureVideoCallViewController.videoView)
         }
     }
     
@@ -123,6 +149,7 @@ final class PictureInPictureViewController: UIViewController {
 
 extension PictureInPictureViewController: AVPictureInPictureControllerDelegate {
     func pictureInPictureControllerWillStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
+        print("PiP Delegate: Will start PiP")
         Task {
             await MainActor.run {
                 manager.started()
@@ -131,6 +158,7 @@ extension PictureInPictureViewController: AVPictureInPictureControllerDelegate {
     }
     
     func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
+        print("PiP Delegate: Did stop PiP")
         self.pictureInPictureController = nil
         
         Task {
@@ -141,10 +169,12 @@ extension PictureInPictureViewController: AVPictureInPictureControllerDelegate {
     }
     
     func pictureInPictureControllerWillStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
+        print("PiP Delegate: Will stop PiP")
         // NOP
     }
         
     func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController) async -> Bool {
+        print("PiP Delegate: Should restore PiP")
         await MainActor.run {
             manager.restore()
         }

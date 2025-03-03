@@ -103,20 +103,58 @@ import WebRTC
     
     func continueCall() async {
         print("CallManager: Continuing call")
-        pictureInPicture = PictureInPictureManager(state: .starting, videoTrack: nil)
+        
+        // Create PiP manager without starting it yet
+        pictureInPicture = PictureInPictureManager(state: .stopped, videoTrack: nil)
         alert = nil
         
         // Find video tracks for PiP
-        Task {
-            let transceivers = await webRTCClient.transceivers()
-            
-            for participant in participants.filter({ $0.role == .host }) {
-                for track in participant.tracks.filter({ $0.type == .video && $0.mid != nil && $0.pullState == .pulled }) {
-                    if let videoTrack = transceivers.filter({ $0.mediaType == .video }).first(where: { $0.mid == track.mid })?.receiver.track as? RTCVideoTrack {
-                        print("CallManager: Setting video track for PiP")
-                        await pictureInPicture?.setVideoTrack(videoTrack)
+        let transceivers = await webRTCClient.transceivers()
+        
+        // First find the appropriate video track
+        var foundVideoTrack: RTCVideoTrack? = nil
+        
+        for participant in participants.filter({ $0.role == .host }) {
+            for track in participant.tracks.filter({ $0.type == .video && $0.mid != nil && $0.pullState == .pulled }) {
+                if let videoTrack = transceivers.filter({ $0.mediaType == .video }).first(where: { $0.mid == track.mid })?.receiver.track as? RTCVideoTrack {
+                    print("CallManager: Found video track for PiP: \(videoTrack)")
+                    foundVideoTrack = videoTrack
+                    break
+                }
+            }
+            if foundVideoTrack != nil { break }
+        }
+        
+        // If we found a video track, set it before starting PiP
+        if let videoTrack = foundVideoTrack {
+            print("CallManager: Setting video track for PiP before starting")
+            await pictureInPicture?.setVideoTrack(videoTrack)
+        }
+        
+        // Now start the PiP with the track already set
+        await pictureInPicture?.start()
+        
+        // If we didn't find a track initially, keep trying
+        if foundVideoTrack == nil {
+            print("CallManager: No video track found immediately, will look for one later")
+            Task {
+                // Wait for a moment to let WebRTC stabilize
+                try? await Task.sleep(nanoseconds: 2 * 1_000_000_000)
+                
+                // Try again to find a track
+                let transceivers = await webRTCClient.transceivers()
+                
+                for participant in participants.filter({ $0.role == .host }) {
+                    for track in participant.tracks.filter({ $0.type == .video && $0.mid != nil && $0.pullState == .pulled }) {
+                        if let videoTrack = transceivers.filter({ $0.mediaType == .video }).first(where: { $0.mid == track.mid })?.receiver.track as? RTCVideoTrack {
+                            print("CallManager: Found video track for PiP after delay: \(videoTrack)")
+                            await pictureInPicture?.setVideoTrack(videoTrack)
+                            return
+                        }
                     }
                 }
+                
+                print("CallManager: Still no video track found after delay")
             }
         }
     }
@@ -283,7 +321,12 @@ import WebRTC
             return
         }
         
+        await pullTracksInternal(sessionId: sessionId, retryCount: 0)
+    }
+    
+    private func pullTracksInternal(sessionId: String, retryCount: Int) async {
         var tracks: [APIClient.PullTracksRequest.Track] = []
+        var retryTracks: [APIClient.PullTracksRequest.Track] = []
         
         // Find tracks to pull
         for participant in participants.filter({ $0.role == .host }) {
@@ -292,29 +335,99 @@ import WebRTC
                 continue
             }
             
-            for track in participant.tracks.filter({ $0.pullState == .notPulled }) {
-                track.pullState = .pulling
+            print("CallManager: Checking host participant: \(participant.id), session ID: \(participantSessionId), track count: \(participant.tracks.count), retry: \(retryCount)")
+            
+            // Debug: Print all tracks
+            for track in participant.tracks {
+                print("CallManager: Track info - ID: \(track.id), Type: \(track.type.rawValue), State: \(track.state.rawValue), PullState: \(String(describing: track.pullState))")
+            }
+            
+            // First try to find tracks marked as notPulled
+            let tracksToPull = participant.tracks.filter({ $0.pullState == .notPulled })
+            
+            if !tracksToPull.isEmpty {
+                print("CallManager: Found \(tracksToPull.count) tracks to pull normally")
                 
-                tracks.append(APIClient.PullTracksRequest.Track(
-                    location: "remote",
-                    trackName: track.id,
-                    sessionId: participantSessionId
-                ))
+                for track in tracksToPull {
+                    track.pullState = .pulling
+                    
+                    // IMPORTANT FIX: Extract just the track ID without the session prefix
+                    let trackName = track.id.contains("/") ?
+                    String(track.id.split(separator: "/").last ?? "") : track.id
+                    
+                    print("CallManager: Using track ID for pull: \(trackName) with session ID: \(participantSessionId)")
+                    
+                    tracks.append(APIClient.PullTracksRequest.Track(
+                        location: "remote",
+                        trackName: trackName,
+                        sessionId: participantSessionId
+                    ))
+                }
+            } else {
+                // If no tracks marked as notPulled, force-pull any video track that isn't already pulled
+                print("CallManager: No tracks with notPulled state, attempting to force-pull video tracks")
+                
+                // Only attempt to force-pull on first few retries to avoid infinite loops
+                if retryCount < 5 {
+                    for track in participant.tracks.filter({ $0.type == .video && $0.pullState != .pulled }) {
+                        print("CallManager: Force-pulling video track: \(track.id)")
+                        track.pullState = .pulling
+                        
+                        // Extract just the track ID without the session prefix
+                        let trackName = track.id.contains("/") ?
+                        String(track.id.split(separator: "/").last ?? "") : track.id
+                        
+                        print("CallManager: Using track ID for pull: \(trackName) with session ID: \(participantSessionId)")
+                        
+                        tracks.append(APIClient.PullTracksRequest.Track(
+                            location: "remote",
+                            trackName: trackName,
+                            sessionId: participantSessionId
+                        ))
+                    }
+                } else {
+                    print("CallManager: Reached maximum retry attempts (\(retryCount)), stopping retry cycle")
+                }
             }
         }
         
         guard !tracks.isEmpty else {
-            print("CallManager: No tracks to pull")
+            print("CallManager: No tracks to pull after all attempts")
             return
         }
         
-        print("CallManager: Pulling \(tracks.count) tracks")
+        print("CallManager: Pulling \(tracks.count) tracks (retry: \(retryCount))")
         
         do {
             let pullTracksResponse = try await apiClient.request(
                 endpoint: .pullTracks(sessionId, .init(tracks: tracks)),
                 as: APIClient.PullTracksResponse.self
             )
+            
+            // Check for failed tracks to retry
+            for track in pullTracksResponse.tracks {
+                if let errorCode = track.errorCode, errorCode == "not_found_track_error" {
+                    print("CallManager: Track not found error for: \(track.trackName). Will retry.")
+                    
+                    // If we got a "track not found" error, prepare to retry this track
+                    retryTracks.append(APIClient.PullTracksRequest.Track(
+                        location: "remote",
+                        trackName: track.trackName,
+                        sessionId: track.sessionId ?? ""
+                    ))
+                    
+                    // Find the track in our participants and reset its state
+                    for participant in participants {
+                        if let trackIndex = participant.tracks.firstIndex(where: {
+                            let trackId = $0.id.contains("/") ?
+                            String($0.id.split(separator: "/").last ?? "") : $0.id
+                            return trackId == track.trackName
+                        }) {
+                            participant.tracks[trackIndex].pullState = .notPulled
+                        }
+                    }
+                }
+            }
             
             if let sessionDescription = pullTracksResponse.sessionDescription,
                pullTracksResponse.requiresImmediateRenegotiation {
@@ -332,13 +445,71 @@ import WebRTC
                 )
                 
                 // Update track states
+                var videoTrackFound = false
+                var videoTrackMid: String? = nil
+                
                 for track in pullTracksResponse.tracks {
-                    for participant in participants {
-                        if let trackIndex = participant.tracks.firstIndex(where: { $0.id == track.trackName }) {
-                            print("CallManager: Track pulled successfully: \(track.trackName)")
-                            participant.tracks[trackIndex].pullState = .pulled
-                            participant.tracks[trackIndex].mid = track.mid
+                    if track.errorCode == nil {
+                        print("CallManager: Processing successful pulled track: \(track.trackName), mid: \(track.mid)")
+                        
+                        for participant in participants {
+                            if let trackIndex = participant.tracks.firstIndex(where: {
+                                let trackId = $0.id.contains("/") ?
+                                String($0.id.split(separator: "/").last ?? "") : $0.id
+                                return trackId == track.trackName
+                            }) {
+                                print("CallManager: Track pulled successfully: \(track.trackName)")
+                                participant.tracks[trackIndex].pullState = .pulled
+                                participant.tracks[trackIndex].mid = track.mid
+                                
+                                // If this is a video track, remember it for later
+                                if participant.tracks[trackIndex].type == .video {
+                                    videoTrackFound = true
+                                    videoTrackMid = track.mid
+                                }
+                            }
                         }
+                    }
+                }
+                
+                // If we found a video track, set it on the PiP view
+                if videoTrackFound, let mid = videoTrackMid {
+                    print("CallManager: Found video track with mid: \(mid), setting it on PiP")
+                    
+                    // Get all transceivers
+                    let transceivers = await webRTCClient.transceivers()
+                    
+                    // Find the video transceiver with the matching mid
+                    if let videoTrack = transceivers.filter({ $0.mediaType == .video }).first(where: { $0.mid == mid })?.receiver.track as? RTCVideoTrack {
+                        print("CallManager: Setting video track for PiP: \(videoTrack)")
+                        
+                        // If we don't have a PiP manager yet, start with continueCall
+                        if pictureInPicture == nil {
+                            await continueCall()
+                        } else {
+                            // Otherwise just set the track
+                            await pictureInPicture?.setVideoTrack(videoTrack)
+                        }
+                    } else {
+                        print("CallManager: Could not find video transceiver with mid: \(mid)")
+                    }
+                }
+            }
+            
+            // If we have tracks to retry, schedule a retry after a delay
+            if !retryTracks.isEmpty && retryCount < 5 {
+                print("CallManager: Scheduling retry for \(retryTracks.count) tracks after delay")
+                
+                // Schedule a retry with increasing delays
+                let delaySeconds = Double(1 + retryCount) // 1s, 2s, 3s, 4s, 5s
+                
+                Task {
+                    try? await Task.sleep(nanoseconds: UInt64(delaySeconds * 1_000_000_000))
+                    
+                    // Check if the call is still active
+                    if !Task.isCancelled && sessionId == self.sessionId {
+                        print("CallManager: Executing retry #\(retryCount + 1) for \(retryTracks.count) tracks")
+                        await pullTracksInternal(sessionId: sessionId, retryCount: retryCount + 1)
                     }
                 }
             }

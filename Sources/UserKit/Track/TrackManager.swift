@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import Combine
 
 @MainActor class TrackManager: ObservableObject, Identifiable {
     let id: String
@@ -14,6 +15,9 @@ import SwiftUI
     @Published var pushState: PushState
     let type: TrackType
     @Published var mid: String?
+    
+    // Add a publisher for track state changes
+    let trackStateChanged = PassthroughSubject<Void, Never>()
     
     private let webRTCClient: WebRTCClient
     private let cameraClient = CameraClient()
@@ -83,12 +87,26 @@ import SwiftUI
     }
     
     func pull() async {
-        // Pulling track logic - would be called from participant manager
+        // Mark that we're pulling the track
+        if pullState == .notPulled {
+            pullState = .pulling
+            // Notify that the track state changed
+            trackStateChanged.send()
+        }
     }
     
     func pulled(_ track: APIClient.PullTracksResponse.Track) {
+        let oldPullState = pullState
+        let oldMid = mid
+        
         pullState = .pulled
         mid = track.mid
+        
+        // Notify that the track state changed if something meaningful changed
+        if oldPullState != .pulled || oldMid != mid {
+            print("Track: \(id) pulled successfully, mid: \(track.mid)")
+            trackStateChanged.send()
+        }
     }
     
     func request() async {

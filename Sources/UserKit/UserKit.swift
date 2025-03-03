@@ -116,7 +116,6 @@ public class UserKit {
     }
 }
 
-// MARK: - UserKitManager (replaces UserKitApp)
 @MainActor class UserKitManager: ObservableObject {
     private let config: UserKit.Config
     private let apiClient: APIClient
