@@ -5,20 +5,6 @@
 //  Created by Peter Nicholls on 4/3/2025.
 //
 
-//
-//  CameraClient.swift
-//  UserKit
-//
-//  Created by Peter Nicholls on 4/3/2025.
-//
-
-//
-//  CameraClient.swift
-//  UserKit
-//
-//  Created by Peter Nicholls on 4/3/2025.
-//
-
 import AVKit
 
 // Helper class to handle camera delegate callbacks - moved outside the actor
@@ -45,6 +31,7 @@ actor CameraClient {
     private var bufferDelegate: CameraBufferDelegate?
     
     private let captureQueue = DispatchQueue(label: "com.camera.capture")
+    private let setupQueue = DispatchQueue(label: "com.camera.setup", qos: .userInitiated)
     
     struct Buffer {
         let sampleBuffer: CMSampleBuffer
@@ -94,48 +81,62 @@ actor CameraClient {
         }
         self.bufferDelegate = bufferDelegate
         
-        // Now perform UI-related setup on the main thread
-        await MainActor.run {
+        // Get front camera device on the main thread since device access needs it
+        let deviceInfo: (AVCaptureDevice, AVCaptureDeviceInput)? = await MainActor.run {
             // Get front camera device
             guard let device = AVCaptureDevice.default(.builtInWideAngleCamera,
                                                       for: .video,
                                                       position: .front) else {
-                return
+                return nil
             }
             
             // Create device input
             guard let input = try? AVCaptureDeviceInput(device: device) else {
-                return
+                return nil
             }
             
-            // Add input to session
-            if session.canAddInput(input) {
-                session.addInput(input)
-            }
-            
-            // Setup video data output
-            let dataOutput = AVCaptureVideoDataOutput()
-            dataOutput.setSampleBufferDelegate(
-                bufferDelegate,
-                queue: self.captureQueue
-            )
-            dataOutput.videoSettings = [
-                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
-            ]
-            
-            // Add output to session
-            if session.canAddOutput(dataOutput) {
-                session.addOutput(dataOutput)
-            }
-            
-            // Store the output reference in the actor
-            Task {
-                await self.setVideoDataOutput(dataOutput)
-            }
-            
-            // Start the capture session
-            if !session.isRunning {
-                session.startRunning()
+            return (device, input)
+        }
+        
+        guard let (device, input) = deviceInfo else {
+            print("Camera device or input unavailable")
+            return
+        }
+        
+        // Now perform camera setup on a background thread
+        await withCheckedContinuation { continuation in
+            setupQueue.async {
+                // Add input to session
+                if session.canAddInput(input) {
+                    session.addInput(input)
+                }
+                
+                // Setup video data output
+                let dataOutput = AVCaptureVideoDataOutput()
+                dataOutput.setSampleBufferDelegate(
+                    bufferDelegate,
+                    queue: self.captureQueue
+                )
+                dataOutput.videoSettings = [
+                    kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
+                ]
+                
+                // Add output to session
+                if session.canAddOutput(dataOutput) {
+                    session.addOutput(dataOutput)
+                }
+                
+                // Important: Start the capture session on background thread
+                print("Starting camera capture session on background thread")
+                if !session.isRunning {
+                    session.startRunning()
+                }
+                
+                // Store the output reference in the actor
+                Task {
+                    await self.setVideoDataOutput(dataOutput)
+                    continuation.resume()
+                }
             }
         }
     }
@@ -148,13 +149,16 @@ actor CameraClient {
         // Get a local reference to the capture session inside the actor
         guard let session = _captureSession else { return }
         
-        // Perform the UI operation on the main thread
-        await MainActor.run {
-            if session.isRunning {
-                session.stopRunning()
+        // Perform the stopRunning operation on a background thread
+        await withCheckedContinuation { continuation in
+            setupQueue.async {
+                if session.isRunning {
+                    session.stopRunning()
+                }
+                Task {
+                    continuation.resume()
+                }
             }
         }
     }
-    
-    // The CameraBufferDelegate class has been moved outside the actor
 }

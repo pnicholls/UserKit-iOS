@@ -7,12 +7,8 @@
 
 import SwiftUI
 
-struct UserView: View {
-    @ObservedObject var userManager: UserManager
-    
+struct UserView: View {    
     var body: some View {
-        if let callManager = userManager.call {
-            CallView(callManager: callManager)
-        }
+        EmptyView()
     }
 }

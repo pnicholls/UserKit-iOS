@@ -76,7 +76,7 @@ actor WebRTCClient {
         peerConnection?.close()
     }
     
-    func configure() async throws {
+    func configure() async throws -> RTCPeerConnection {
         let config = RTCConfiguration()
         config.bundlePolicy = .maxBundle
         config.iceServers = [RTCIceServer(urlStrings: ["stun:stun.cloudflare.com:3478"])]
@@ -103,6 +103,8 @@ actor WebRTCClient {
         addAudioTrack()
         addVideoTrack()
         addScreenShareTrack()
+        
+        return peerConnection
     }
     
     private func addAudioTrack() {

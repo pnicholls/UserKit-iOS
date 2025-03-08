@@ -7,153 +7,138 @@
 
 import SwiftUI
 
-@MainActor class UserManager: ObservableObject {
-    private let accessToken: String
+struct Credentials: Codable {
+    let apiKey: String
+    let id: String?
+    let name: String?
+    let email: String?
+}
+
+class UserManager {
+    
+    // MARK: - Types
+    
+    struct User: Codable {
+        let call: Call
+    }
+    
+    enum State {
+        case none
+        case some(User)
+    }
+    
+    // MARK: - Properties
+    
     private let apiClient: APIClient
-    private let webRTCClient: WebRTCClient
-    private let webSocketClient: WebSocketClient
+
+    private let callManager: CallManager
     
-    @Published var call: CallManager?
-    @Published var webSocketState: WebSocketState = .disconnected
+    private let storage: Storage
     
-    private let webSocketURL: URL
-    private var webSocketTask: Task<Void, Error>?
+    private let webSocket: WebSocket
     
-    enum WebSocketState: Equatable {
-        case connected
-        case connecting
-        case disconnected
-    }
+    private let state: StateSync<State>
     
-    init(accessToken: String, webSocketURL: URL, apiClient: APIClient, webRTCClient: WebRTCClient) {
-        self.accessToken = accessToken
-        self.webSocketURL = webSocketURL
+    // MARK: - Functions
+    
+    init(apiClient: APIClient, callManager: CallManager, storage: Storage, webSocket: WebSocket) {
         self.apiClient = apiClient
-        self.webRTCClient = webRTCClient
-        self.webSocketClient = WebSocketClient()
+        self.callManager = callManager
+        self.storage = storage
+        self.webSocket = webSocket
+        self.state = .init(.none)
         
-        print("UserManager: Initialized")
-    }
-    
-    func initialize() async {
-        print("UserManager: Starting initialization")
-        await connectWebSocket()
-    }
-    
-    private func connectWebSocket() async {
-        guard webSocketState == .disconnected else {
-            print("UserManager: WebSocket already connecting or connected")
-            if let task = webSocketTask {
-                task.cancel()
+        state.onDidMutate = { [weak self] newState, oldState in
+            switch newState {
+            case .some(let state):
+                self?.callManager.update(state: state.call)
+            case .none:
+                self?.callManager.update(state: nil)
             }
+        }
+    }
+    
+    func login(apiKey: String, id: String?, name: String?, email: String?) async throws {
+        enum UserKitError: Error {
+            case loginCredentialRequired
+        }
+        
+        if (id?.isEmpty ?? true) && (name?.isEmpty ?? true) && (email?.isEmpty ?? true) {
+            throw UserKitError.loginCredentialRequired
+        }
+        
+        let credentials = Credentials(apiKey: apiKey, id: id, name: name, email: email)
+        storage.save(credentials, forType: AppUserCredentials.self)
+                
+        try await connect()
+    }
+    
+    func connect() async throws {
+        guard let credentials = storage.get(AppUserCredentials.self) else {
+            assertionFailure("Connect called with no credentials found")
             return
         }
+                
+        let response = try await apiClient.request(
+            apiKey: credentials.apiKey,
+            endpoint: .postUser(
+                .init(
+                    id: credentials.id,
+                    name: credentials.name,
+                    email: credentials.email,
+                    appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+                )
+            ),
+            as: APIClient.UserResponse.self
+        )
+
+        await apiClient.setAccessToken(response.accessToken)
+
+        let socket = try await webSocket.connect(to: response.webSocketUrl)
         
-        print("UserManager: Connecting to WebSocket")
-        webSocketState = .connecting
-        
-        webSocketTask = Task {
-            do {
-                print("UserManager: Attempting WebSocket connection to \(webSocketURL)")
-                let socket = try await webSocketClient.connect(to: webSocketURL, with: [])
-                webSocketState = .connected
-                print("UserManager: WebSocket connected")
-                
-                // Launch a heartbeat task
-                Task {
-                    while !Task.isCancelled {
-                        try await Task.sleep(nanoseconds: 10 * 1_000_000_000)
-                        try await self.webSocketClient.sendPing()
-                    }
-                }
-                
-                // Listen for messages
-                for try await message in socket.messages {
-                    await handleWebSocketMessage(message)
-                }
-                
-                print("UserManager: WebSocket disconnected")
-                webSocketState = .disconnected
-            } catch {
-                webSocketState = .disconnected
-                print("UserManager: WebSocket connection failed: \(error)")
-            }
+        for try await message in socket.messages {
+            await handle(message: message)
         }
     }
     
-    private func handleWebSocketMessage(_ message: URLSessionWebSocketTask.Message) async {
+    private func handle(message: URLSessionWebSocketTask.Message) async {
         do {
-            guard case .string(let messageString) = message else {
-                print("UserManager: Unexpected data received")
+            guard case .string(let messageString) = message,
+                  let data = messageString.data(using: .utf8),
+                  let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let messageType = json["type"] as? String else {
+                assertionFailure("Invalid WebSocket message format")
                 return
             }
+
+            switch messageType {
+            case "user-socket-pong":
+                // NOP
+                break
             
-            let decoder = JSONDecoder()
-            guard let data = messageString.data(using: .utf8) else { return }
-            
-            print("UserManager: Received WebSocket message: \(messageString)")
-            
-            // Decode the message - simplified for now, add error handling as needed
-            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let messageType = json["type"] as? String {
+            case "userState":
+                update(state: json)
                 
-                switch messageType {
-                case "user-socket-pong":
-                    // Handle pong - no action needed
-                    print("UserManager: Received pong")
-                    break
-                    
-                case "userState":
-                    print("UserManager: Received userState update")
-                    if let stateData = json["state"] as? [String: Any],
-                       let callData = stateData["call"] as? [String: Any] {
-                        await updateCallState(from: callData)
-                    } else if call != nil {
-                        // Call ended
-                        print("UserManager: Call ended")
-                        await endCall()
-                    }
-                    
-                default:
-                    print("UserManager: Unknown message type: \(messageType)")
-                }
+            default:
+                print("Unknown message type: \(messageType)")
             }
         } catch {
-            print("UserManager: Failed to decode WebSocket message: \(error)")
+            self.state.mutate { $0 = .none }
+            assertionFailure("Failed to process WebSocket message: \(error)")
         }
     }
     
-    private func updateCallState(from callData: [String: Any]) async {
-        print("UserManager: Updating call state")
-        
-        // Create or update call manager
-        if call == nil {
-            // Create new call with an alert
-            print("UserManager: Creating new CallManager")
-            call = CallManager(
-                apiClient: apiClient,
-                webRTCClient: webRTCClient,
-                webSocketClient: webSocketClient,
-                alert: CallManager.AlertInfo(
-                    title: "Luke Longworth would like to start a call",
-                    acceptText: "Accept",
-                    declineText: "Decline"
-                )
-            )
-            // Note: We no longer call initialize() here - it will be called by CallView
+    private func update(state: [String: Any]) {
+        do {
+            let state = state["state"] as? [String: Any]
+            let data = try JSONSerialization.data(withJSONObject: state ?? [:])
+            let user = try JSONDecoder().decode(User.self, from: data)
+            self.state.mutate {
+                $0 = .some(user)
+            }
+        } catch {
+            self.state.mutate { $0 = .none }
+            assertionFailure("Failed to update user state")
         }
-        
-        // Update participants if present
-        if let participantsData = callData["participants"] as? [[String: Any]] {
-            print("UserManager: Updating participants in call")
-            await call?.updateParticipants(from: participantsData)
-        }
-    }
-    
-    private func endCall() async {
-        print("UserManager: Ending call and cleaning up resources")
-        await webRTCClient.close()
-        // Stop other services as needed
-        call = nil
     }
 }

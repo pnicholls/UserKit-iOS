@@ -8,11 +8,9 @@
 import SwiftUI
 import UIKit
 
-struct PictureInPictureView: UIViewControllerRepresentable {
-    @ObservedObject var manager: PictureInPictureManager
-    
+struct PictureInPictureView: UIViewControllerRepresentable {    
     func makeUIViewController(context: Context) -> PictureInPictureViewController {
-        return PictureInPictureViewController(manager: manager)
+        return PictureInPictureViewController()
     }
     
     func updateUIViewController(_ uiViewController: PictureInPictureViewController, context: Context) {

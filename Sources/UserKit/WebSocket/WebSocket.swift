@@ -7,14 +7,28 @@
 
 import Foundation
 
-actor WebSocketClient {
+actor WebSocket {
+    
+    // MARK: - Properties
+            
+    public var connectionState: ConnectionState {
+        state
+    }
+    
+    private var state: ConnectionState = .disconnected
     private var socketTask: URLSessionWebSocketTask?
     private var session: URLSession?
+    
+    enum ConnectionState {
+            case disconnected
+            case connecting
+            case connected
+            case disconnecting
+        }
     
     struct ConnectionError: Error {}
     struct SendError: Error {}
     
-    // Helper struct to represent the combined stream of messages
     struct WebSocketStream {
         let messages: AsyncStream<URLSessionWebSocketTask.Message>
         
@@ -45,15 +59,29 @@ actor WebSocketClient {
         }
     }
     
-    func connect(to url: URL, with protocols: [String]) async throws -> WebSocketStream {
+    func connect(to url: URL) async throws -> WebSocketStream {
+        state = .connecting
         self.session = URLSession(configuration: .default, delegate: nil, delegateQueue: nil)
         
-        socketTask = session?.webSocketTask(with: url, protocols: protocols)
+        socketTask = session?.webSocketTask(with: url, protocols: [])
         guard let task = socketTask else {
+            state = .disconnected
             throw ConnectionError()
         }
         
         task.resume()
+        state = .connected
+        
+        Task.detached { [weak self] in
+            while let self = self, await self.state == .connected, task.state == .running {
+                do {
+                    try await self.sendPing()
+                    try await Task.sleep(nanoseconds: 30_000_000_000)
+                } catch {
+                    assertionFailure("Ping failed: \(error)")
+                }
+            }
+        }
         
         return WebSocketStream(task)
     }
@@ -76,8 +104,10 @@ actor WebSocketClient {
     }
     
     func disconnect() {
+        state = .disconnecting
         socketTask?.cancel(with: .normalClosure, reason: nil)
         socketTask = nil
         session = nil
+        state = .disconnected
     }
 }

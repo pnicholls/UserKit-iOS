@@ -8,33 +8,25 @@
 import AVKit
 import SwiftUI
 import WebRTC
-import Combine
 
-// Helper function to create an async timer stream
-func timerStream(interval: TimeInterval) -> AsyncStream<Date> {
-    AsyncStream { continuation in
-        let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { timer in
-            continuation.yield(Date())
-        }
-        
-        continuation.onTermination = { _ in
-            timer.invalidate()
-        }
-        
-        // Add timer to RunLoop to ensure it fires
-        RunLoop.current.add(timer, forMode: .common)
-    }
+protocol PictureInPictureViewControllerDelegate: AnyObject {
+    func pictureInPictureControllerWillStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController)
+    func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController)
+    func pictureInPictureControllerWillStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController)
+    func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController) async -> Bool
 }
-
-
 
 final class PictureInPictureViewController: UIViewController {
     
     // MARK: - Properties
-
-    private let manager: PictureInPictureManager
-    private var cancellables = Set<AnyCancellable>()
     
+    weak var delegate: PictureInPictureViewControllerDelegate?
+    
+    lazy var pictureInPictureController: AVPictureInPictureController = {
+        let pictureInPictureController = AVPictureInPictureController(contentSource: pictureInPictureControllerContentSource)
+        return pictureInPictureController
+    }()
+        
     private lazy var pictureInPictureVideoCallViewController: PictureInPictureVideoCallViewController = {
         let pictureInPictureVideoCallViewController = PictureInPictureVideoCallViewController()
         return pictureInPictureVideoCallViewController
@@ -47,142 +39,47 @@ final class PictureInPictureViewController: UIViewController {
         )
         return pictureInPictureControllerContentSource
     }()
-    
-    private var pictureInPictureController: AVPictureInPictureController?
-    private var managerObservation: Task<Void, Never>?
-            
+                
     // MARK: - Functions
-    
-    init(manager: PictureInPictureManager) {
-        self.manager = manager
-        
-        super.init(nibName: nil, bundle: nil)
-    }
-    
-    required init?(coder: NSCoder) {
-      fatalError("init(coder:) has not been implemented")
-    }
-        
+            
     override func viewDidLoad() {
         super.viewDidLoad()
                         
-        pictureInPictureController = AVPictureInPictureController(contentSource: pictureInPictureControllerContentSource)
-        pictureInPictureController?.canStartPictureInPictureAutomaticallyFromInline = false
-        pictureInPictureController?.delegate = self
+        view.backgroundColor = .clear
         
-        setupManagerObservation()
-        setupTrackObservation()
-    }
-    
-    private func setupManagerObservation() {
-        // Create a Task that uses our timer stream
-        managerObservation = Task { [weak self] in
-            // Use our timer stream with 0.1s interval
-            for await _ in timerStream(interval: 0.1) {
-                guard let self = self else { break }
-                
-                // This doesn't use Task.sleep at all
-                await MainActor.run {
-                    self.updateUI()
-                }
-                
-                // Check for cancellation
-                if Task.isCancelled { break }
-            }
-        }
-    }
-    
-    private func setupTrackObservation() {
-        // Set the initial video track if it exists
-        if let track = manager.videoTrack {
-            print("PiP Controller: Adding initial video track to view")
-            attachTrackToView(track)
-        }
-        
-        // Use Combine to observe track changes
-        manager.trackChanged
-            .receive(on: RunLoop.main)
-            .sink { [weak self] track in
-                print("PiP Controller: Track changed notification received")
-                self?.attachTrackToView(track)
-            }
-            .store(in: &cancellables)
-    }
-    
-    private func attachTrackToView(_ track: RTCVideoTrack) {
-        print("PiP Controller: Attaching track to view")
-        track.add(pictureInPictureVideoCallViewController.videoView)
-    }
-    
-    private func updateUI() {
-        switch manager.state {
-        case .starting where !(pictureInPictureController?.isPictureInPictureActive ?? false):
-            print("PiP Controller: Starting PiP")
-            pictureInPictureController?.startPictureInPicture()
-        case .started where !(pictureInPictureController?.isPictureInPictureActive ?? false):
-            print("PiP Controller: Starting PiP (from started state)")
-            pictureInPictureController?.startPictureInPicture()
-        case .stopped:
-            print("PiP Controller: Stopping PiP")
-            pictureInPictureController?.stopPictureInPicture()
-        default:
-            break
-        }
-    }
-    
-    override func viewDidAppear(_ animated: Bool) {
-        super.viewDidAppear(animated)
-        
-        // This is required
-        Task {
-            await MainActor.run {
-                manager.start()
-            }
-        }
-    }
-    
-    override func viewWillDisappear(_ animated: Bool) {
-        super.viewWillDisappear(animated)
-        managerObservation?.cancel()
+        // Picture in picture needs to be called here,
+        // something about being a lazy var causes it not to start
+        pictureInPictureController.delegate = self
+        pictureInPictureController.canStartPictureInPictureAutomaticallyFromInline = false
     }
 }
 
 extension PictureInPictureViewController: AVPictureInPictureControllerDelegate {
+    func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, failedToStartPictureInPictureWithError error: any Error) {
+        assertionFailure("Failed to start picture in picture: \(error)")
+    }
+    
     func pictureInPictureControllerWillStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
-        print("PiP Delegate: Will start PiP")
-        Task {
-            await MainActor.run {
-                manager.started()
-            }
-        }
+        delegate?.pictureInPictureControllerWillStartPictureInPicture(pictureInPictureController)
     }
     
     func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
-        print("PiP Delegate: Did stop PiP")
-        self.pictureInPictureController = nil
-        
-        Task {
-            await MainActor.run {
-                manager.stopped()
-            }
-        }
+        delegate?.pictureInPictureControllerDidStopPictureInPicture(pictureInPictureController)
     }
     
     func pictureInPictureControllerWillStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
-        print("PiP Delegate: Will stop PiP")
-        // NOP
+        delegate?.pictureInPictureControllerWillStopPictureInPicture(pictureInPictureController)
     }
         
     func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController) async -> Bool {
-        print("PiP Delegate: Should restore PiP")
-        await MainActor.run {
-            manager.restore()
+        guard let delegate = delegate else {
+            return true
         }
-        return true
+        
+        return await delegate.pictureInPictureController(pictureInPictureController)
     }
 }
 
-// View controller representable adaptor
 class PictureInPictureVideoCallViewController: AVPictureInPictureVideoCallViewController {
     lazy var videoView: RTCMTLVideoView = {
         let videoView = RTCMTLVideoView()
