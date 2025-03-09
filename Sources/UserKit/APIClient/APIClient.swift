@@ -24,6 +24,7 @@ actor APIClient {
         return try decoder.decode(T.self, from: data)
     }
     
+    @discardableResult
     func request<T: Decodable>(endpoint: Route, as type: T.Type) async throws -> T {
         guard let token = accessToken else {
             throw APIError.missingAPIKey
@@ -51,17 +52,17 @@ actor APIClient {
             let json = try encoder.encode(body)
             request.httpBody = json
             
-            print("Raw JSON Request: \(String(data: json, encoding: .utf8) ?? "unable to decode")")
+//            print("Raw JSON Request: \(String(data: json, encoding: .utf8) ?? "unable to decode")")
         }
         
         let (data, _) = try await URLSession.shared.data(for: request)
         
-        // Print raw JSON response
-        if let jsonString = String(data: data, encoding: .utf8) {
-            print("Raw JSON Response: \(jsonString)")
-        } else {
-            print("Unable to convert response data to string")
-        }
+//        // Print raw JSON response
+//        if let jsonString = String(data: data, encoding: .utf8) {
+//            print("Raw JSON Response: \(jsonString)")
+//        } else {
+//            print("Unable to convert response data to string")
+//        }
         
         return data
     }

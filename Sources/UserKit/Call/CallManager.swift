@@ -19,32 +19,33 @@ import WebRTC
 
 struct Call: Codable, Equatable {
     struct Participant: Codable, Equatable {
-        public enum State: String, Codable {
+        enum State: String, Codable {
             case none
             case declined
             case joined
         }
         
-        public enum Role: String, Codable {
+        enum Role: String, Codable {
             case host
             case user
         }
         
-        public struct Track: Codable, Equatable {
-            public enum State: String, Codable {
+        struct Track: Codable, Equatable {
+            enum State: String, Codable {
                 case active, requested, inactive
             }
             
-            public enum TrackType: String, Codable {
+            enum TrackType: String, Codable {
                 case audio, video, screenShare
             }
             
-            public let state: State
-            public let id: String?
-            public let type: TrackType
+            let state: State
+            let id: String?
+            let type: TrackType
         }
 
         let id: String
+        let name: String
         let state: State
         let role: Role
         let tracks: [Track]
@@ -79,6 +80,8 @@ class CallManager {
             pictureInPictureViewController?.delegate = self
         }
     }
+    
+    private var videoTrack: RTCVideoTrack?
         
     // MARK: - Functions
     
@@ -92,14 +95,18 @@ class CallManager {
             Task {
                 switch (oldState, newState) {
                 case (.none, .some(let call)):
+                    print(call)
                     await self?.addPictureInPictureViewController()
-                    await self?.presentAlert(title: "Join Call?", message: "Example Text", options: [
+                    
+                    let name = call.participants.first(where: { $0.role == .host})?.name
+                    let message = "\(name ?? "Someone") is inviting you to a call"
+                    await self?.presentAlert(title: "Incoming Call", message: message, options: [
                         UIAlertAction(title: "Join", style: .default) { [weak self] alertAction in
                             Task {
                                 await self?.join()
                             }
                         },
-                        UIAlertAction(title: "Decline", style: .cancel) { [weak self] alertAction in
+                        UIAlertAction(title: "Not Now", style: .cancel) { [weak self] alertAction in
                             Task {
                                 await self?.decline()
                             }
@@ -160,12 +167,12 @@ class CallManager {
             let jsonData = try JSONSerialization.data(withJSONObject: message, options: .prettyPrinted)
             let json = String(data: jsonData, encoding: .utf8)!
             try await webSocketClient.send(message: .string(json))
-                        
-            // Pull the tracks
-            try await pullTracks()
         } catch {
             assertionFailure("Failed to join call: \(error.localizedDescription)")
         }
+        
+        // Pull the tracks
+        await pullTracks()
     }
     
     private func decline() async {
@@ -194,8 +201,8 @@ class CallManager {
         viewController.addChild(pictureInPictureViewController)
         viewController.view.addSubview(pictureInPictureViewController.view)
         pictureInPictureViewController.view.isUserInteractionEnabled = false
-        pictureInPictureViewController.view.isHidden = true
-        pictureInPictureViewController.view.frame = .init(x: viewController.view.frame.width - 150, y: viewController.view.safeAreaInsets.top, width: 150, height: 150)
+        pictureInPictureViewController.view.isHidden = false
+        pictureInPictureViewController.view.frame = .init(x: viewController.view.frame.width - 50, y: viewController.view.safeAreaInsets.top, width: 50, height: 50)
         pictureInPictureViewController.didMove(toParent: viewController)
     }
         
@@ -215,7 +222,73 @@ class CallManager {
         pictureInPictureViewController.pictureInPictureController.stopPictureInPicture()
     }
     
-    private func pullTracks() async throws {}
+    private func pullTracks() async {
+        guard let sessionId = sessionId else {
+            return assertionFailure("Failed to pull tracks, session required")
+        }
+        
+        guard case .some(let call) = state.read({ $0 }) else {
+            return assertionFailure("Failed to pull tracks, invalid call state")
+        }
+                
+        var tracks: [APIClient.PullTracksRequest.Track] = []
+        
+        let participants = call.participants.filter { $0.role == .host }
+        for participant in participants {
+            guard let sessionId = participant.transceiverSessionId else {
+                continue
+            }
+            
+            for track in participant.tracks {
+                guard let id = track.id else {
+                    continue
+                }
+                
+                let trackName = id.contains("/") ? String(id.split(separator: "/").last ?? "") : id
+
+                tracks.append(
+                    APIClient.PullTracksRequest.Track(
+                        location: "remote",
+                        trackName: trackName,
+                        sessionId: sessionId
+                    )
+                )
+            }
+        }
+        
+        if tracks.isEmpty {
+            return
+        }
+        
+        do {
+            let response = try await apiClient.request(
+                endpoint: .pullTracks(sessionId, .init(tracks: tracks)),
+                as: APIClient.PullTracksResponse.self
+            )
+            
+            guard let sessionDescription = response.sessionDescription, response.requiresImmediateRenegotiation else {
+                return assertionFailure("Failed to pull tracks, response invalid")
+            }
+            
+            try await webRTCClient.setRemoteDescription(.init(sdp: sessionDescription.sdp, type: .offer))
+            let answer = try await webRTCClient.createAnswer()
+            let localDescription = try await webRTCClient.setLocalDescription(answer)
+            
+            let transceivers = await webRTCClient.transceivers()
+            if let videoTrack = transceivers.filter({ $0.direction != .sendOnly }).filter({ $0.mediaType == .video }).compactMap({ $0.receiver.track as? RTCVideoTrack }).first {
+                await pictureInPictureViewController?.set(track: videoTrack)
+            }
+            
+            try await apiClient.request(
+                endpoint: .renegotiate(sessionId, .init(
+                    sessionDescription: .init(sdp: localDescription.sdp, type: "answer")
+                )),
+                as: APIClient.RenegotiateResponse.self
+            )
+        } catch {
+            assertionFailure("Failed to pull tracks: \(error.localizedDescription)")
+        }
+    }
 }
 
 extension CallManager: PictureInPictureViewControllerDelegate {
@@ -232,17 +305,27 @@ extension CallManager: PictureInPictureViewControllerDelegate {
     }
     
     func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController) async -> Bool {
-        await MainActor.run {
-            presentAlert(title: "Continue Call?", message: "Example Text", options: [
-                UIAlertAction(title: "Continue", style: .default) { [weak self] alertAction in
-                    self?.startPictureInPicture()
-                },
-                UIAlertAction(title: "End", style: .cancel) { [weak self] alertAction in
-                    Task {
-                        await self?.end()
+        let state = self.state.read { $0 }
+        
+        switch state {
+        case .some(let call):
+            let name = call.participants.first(where: { $0.role == .host})?.name
+            let message = "You are in a call with \(name ?? "someone")"
+
+            await MainActor.run {
+                presentAlert(title: "Continue Call", message: message, options: [
+                    UIAlertAction(title: "Continue", style: .default) { [weak self] alertAction in
+                        self?.startPictureInPicture()
+                    },
+                    UIAlertAction(title: "End", style: .cancel) { [weak self] alertAction in
+                        Task {
+                            await self?.end()
+                        }
                     }
-                }
-            ])
+                ])
+            }
+        case .none:
+            break
         }
         
         return true

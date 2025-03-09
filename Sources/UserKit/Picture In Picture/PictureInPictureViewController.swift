@@ -19,7 +19,7 @@ protocol PictureInPictureViewControllerDelegate: AnyObject {
 final class PictureInPictureViewController: UIViewController {
     
     // MARK: - Properties
-    
+        
     weak var delegate: PictureInPictureViewControllerDelegate?
     
     lazy var pictureInPictureController: AVPictureInPictureController = {
@@ -39,6 +39,12 @@ final class PictureInPictureViewController: UIViewController {
         )
         return pictureInPictureControllerContentSource
     }()
+    
+    private var videoTrack: RTCVideoTrack? {
+        didSet {
+            videoTrack?.add(pictureInPictureVideoCallViewController.videoView)
+        }
+    }
                 
     // MARK: - Functions
             
@@ -51,6 +57,10 @@ final class PictureInPictureViewController: UIViewController {
         // something about being a lazy var causes it not to start
         pictureInPictureController.delegate = self
         pictureInPictureController.canStartPictureInPictureAutomaticallyFromInline = false
+    }
+        
+    func set(track: RTCVideoTrack?) {
+        self.videoTrack = track
     }
 }
 
@@ -81,19 +91,20 @@ extension PictureInPictureViewController: AVPictureInPictureControllerDelegate {
 }
 
 class PictureInPictureVideoCallViewController: AVPictureInPictureVideoCallViewController {
+    
+    // MARK: - Properties
+    
     lazy var videoView: RTCMTLVideoView = {
         let videoView = RTCMTLVideoView()
         videoView.translatesAutoresizingMaskIntoConstraints = false
         return videoView
     }()
-    
-    convenience init() {
-        self.init(nibName: nil, bundle: nil)
-    }
         
+    // MARK: - Functions
+    
     override func viewDidLoad() {
         super.viewDidLoad()
-                
+
         view.addSubview(videoView)
         
         NSLayoutConstraint.activate([

@@ -96,9 +96,10 @@ actor WebRTCClient {
         }
         
         self.peerConnection = peerConnection
-        
-        peerConnectionDelegate = PeerConnectionDelegate()
-        self.peerConnection?.delegate = peerConnectionDelegate
+
+        // Not currently used
+//        peerConnectionDelegate = PeerConnectionDelegate()
+//        self.peerConnection?.delegate = peerConnectionDelegate
                 
         addAudioTrack()
         addVideoTrack()
@@ -262,6 +263,7 @@ actor WebRTCClient {
         return localTransceiversMap
     }
     
+    @discardableResult
     func setRemoteDescription(_ sessionDescription: SessionDescription) async throws -> SessionDescription {
         guard let peerConnection = peerConnection else {
             struct NoPeerConnectionError: Error {}
