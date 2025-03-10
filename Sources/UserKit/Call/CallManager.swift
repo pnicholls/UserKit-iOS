@@ -173,13 +173,17 @@ class CallManager {
         
         // Pull the tracks
         await pullTracks()
+        await pushTracks()
     }
     
     private func decline() async {
         do {
             let message: [String: Any] = ["type": "participantDeclined"]
             let jsonData = try JSONSerialization.data(withJSONObject: message, options: .prettyPrinted)
-            let json = String(data: jsonData, encoding: .utf8)!
+            guard let json = String(data: jsonData, encoding: .utf8) else {
+                enum UserKitError: Error { case invalidJSON }
+                throw UserKitError.invalidJSON
+            }
             try await webSocketClient.send(message: .string(json))
         } catch {
             assertionFailure("Failed to decline call: \(error.localizedDescription)")
@@ -287,6 +291,82 @@ class CallManager {
             )
         } catch {
             assertionFailure("Failed to pull tracks: \(error.localizedDescription)")
+        }
+    }
+    
+    private func pushTracks() async {
+        guard let sessionId = sessionId else {
+            return assertionFailure("Failed to pull tracks, session required")
+        }
+        
+        guard case .some(let call) = state.read({ $0 }) else {
+            return assertionFailure("Failed to pull tracks, invalid call state")
+        }
+
+        do {
+            let offer = try await webRTCClient.createOffer()
+            let localDescription = try await webRTCClient.setLocalDescription(offer)
+            let transceivers = await webRTCClient.getLocalTransceivers()
+            
+            let tracks = transceivers.map { type, transceiver in
+                APIClient.PushTracksRequest.Track(
+                    location: "local",
+                    trackName: transceiver.sender.track!.trackId,
+                    mid: transceiver.mid
+                )
+            }
+            
+            if tracks.isEmpty {
+                return
+            }
+                        
+            let response = try await apiClient.request(
+                endpoint: .pushTracks(sessionId, .init(
+                    sessionDescription: .init(sdp: localDescription.sdp, type: "offer"),
+                    tracks: tracks
+                )),
+                as: APIClient.PushTracksResponse.self
+            )
+            
+            try await webRTCClient.setRemoteDescription(.init(sdp: response.sessionDescription.sdp, type: .answer))
+            
+            guard let participant = call.participants.first(where: { $0.role == .user }) else {
+                return
+            }
+            
+            let localTracks: [[String: Any]] = await webRTCClient.getLocalTransceivers().compactMap { type, transceiver in
+                guard let id = transceiver.sender.track?.trackId else {
+                    return nil
+                }
+                
+                return [
+                    "id": "\(sessionId)/\(id)",
+                    "type": type,
+                    "state": "inactive"
+                ]
+            }
+            
+            let data: [String: Any] = [
+                "id": participant.id,
+                "name": participant.name,
+                "state": participant.state.rawValue,
+                "transceiverSessionId": sessionId,
+                "tracks": localTracks
+            ]
+            
+            let participantUpdate: [String: Any] = [
+                "type": "participantUpdate",
+                "participant": data
+            ]
+            
+            let jsonData = try JSONSerialization.data(withJSONObject: participantUpdate, options: .prettyPrinted)
+            guard let jsonString = String(data: jsonData, encoding: .utf8) else {
+                enum UserKitError: Error { case invalidJSON }
+                throw UserKitError.invalidJSON
+            }
+            try await webSocketClient.send(message: .string(jsonString))
+        } catch {
+            assertionFailure("Failed to push tracks: \(error)")
         }
     }
 }
