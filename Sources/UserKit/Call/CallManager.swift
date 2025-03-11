@@ -318,10 +318,7 @@ class CallManager {
             let answer = try await webRTCClient.createAnswer()
             let localDescription = try await webRTCClient.setLocalDescription(answer)
             
-            let transceivers = await webRTCClient.transceivers()
-            if let videoTrack = transceivers.filter({ $0.direction != .sendOnly }).filter({ $0.mediaType == .video }).compactMap({ $0.receiver.track as? RTCVideoTrack }).first {
-                await pictureInPictureViewController?.set(track: videoTrack)
-            }
+            await setPictureInPictureTrack()
             
             try await apiClient.request(
                 endpoint: .renegotiate(sessionId, .init(
@@ -331,6 +328,13 @@ class CallManager {
             )
         } catch {
             assertionFailure("Failed to pull tracks: \(error.localizedDescription)")
+        }
+    }
+    
+    private func setPictureInPictureTrack() async {
+        let transceivers = await webRTCClient.transceivers()
+        if let videoTrack = transceivers.filter({ $0.direction != .sendOnly }).filter({ $0.mediaType == .video }).compactMap({ $0.receiver.track as? RTCVideoTrack }).first {
+            await pictureInPictureViewController?.set(track: videoTrack)
         }
     }
     
@@ -449,6 +453,7 @@ class CallManager {
                     try! await Task.sleep(nanoseconds: 500_000_000)
                     
                     self?.startPictureInPicture()
+                    await self?.setPictureInPictureTrack()
                 }
                 
                 try await recorder.startCapture { [weak self] sampleBuffer, bufferType, error in
@@ -531,6 +536,7 @@ extension CallManager: PictureInPictureViewControllerDelegate {
                 presentAlert(title: "Continue Call", message: message, options: [
                     UIAlertAction(title: "Continue", style: .default) { [weak self] alertAction in
                         self?.startPictureInPicture()
+                        Task { await self?.setPictureInPictureTrack() }
                     },
                     UIAlertAction(title: "End", style: .cancel) { [weak self] alertAction in
                         Task {
