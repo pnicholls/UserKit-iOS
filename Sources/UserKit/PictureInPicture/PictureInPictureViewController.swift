@@ -9,12 +9,8 @@ import AVKit
 import SwiftUI
 import WebRTC
 
-@objc protocol PictureInPictureViewControllerDelegate: AnyObject {
-    @objc optional func pictureInPictureControllerWillStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController)
-    @objc optional func pictureInPictureControllerDidStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController)
-    @objc optional func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController)
-    @objc optional func pictureInPictureControllerWillStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController)
-    @objc optional func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController) async -> Bool
+protocol PictureInPictureViewControllerDelegate: AnyObject {
+    func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController) async -> Bool
 }
 
 final class PictureInPictureViewController: UIViewController {
@@ -69,33 +65,13 @@ extension PictureInPictureViewController: AVPictureInPictureControllerDelegate {
     func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, failedToStartPictureInPictureWithError error: any Error) {
         assertionFailure("Failed to start picture in picture: \(error)")
     }
-    
-    func pictureInPictureControllerWillStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
-        delegate?.pictureInPictureControllerWillStartPictureInPicture?(pictureInPictureController)
-    }
-    
-    func pictureInPictureControllerDidStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
-        delegate?.pictureInPictureControllerDidStartPictureInPicture?(pictureInPictureController)
-    }
-    
-    func pictureInPictureControllerWillStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
-        delegate?.pictureInPictureControllerWillStopPictureInPicture?(pictureInPictureController)
-    }
-    
-    func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
-        delegate?.pictureInPictureControllerDidStopPictureInPicture?(pictureInPictureController)
-    }
-            
+     
     func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController) async -> Bool {
         guard let delegate = delegate else {
             return true
         }
-        
-        guard let function = delegate.pictureInPictureController else {
-            return true
-        }
-        
-        return await function(pictureInPictureController)
+    
+        return await delegate.pictureInPictureController(pictureInPictureController)
     }
 }
 
