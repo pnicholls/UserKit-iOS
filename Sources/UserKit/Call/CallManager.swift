@@ -96,7 +96,7 @@ class CallManager {
             Task {
                 switch (oldState, newState) {
                 case (.none, .some(let call)):
-                    await self?.addPictureInPictureViewController()
+                    self?.addPictureInPictureViewController()
                     
                     let name = call.participants.first(where: { $0.role == .host})?.name
                     let message = "\(name ?? "Someone") is inviting you to a call"
@@ -173,7 +173,7 @@ class CallManager {
             assertionFailure("Failed to join call: \(error.localizedDescription)")
         }
         
-        // Pull the tracks
+        // Pull and push tracks
         await pullTracks()
         await pushTracks()
     }
@@ -423,134 +423,162 @@ class CallManager {
         let newVideoTrack = newUser.tracks.first(where: { $0.type == .video })
         
         if let newTrack = newVideoTrack, newTrack.state == .requested, oldVideoTrack?.state != .requested {
-            print("video requested")
+            await requestVideo()
         }
         
         let oldScreenShareTrack = oldUser.tracks.first(where: { $0.type == .screenShare })
         let newScreenShareTrack = newUser.tracks.first(where: { $0.type == .screenShare })
         
         if let newTrack = newScreenShareTrack, newTrack.state == .requested, oldScreenShareTrack?.state != .requested {
-            await MainActor.run {
-                pictureInPictureViewController?.delegate = nil
+            await requestScreenShare()
+        }
+    }
+    
+    private func requestVideo() async {
+        let cameraClient = CameraClient()
+        
+        func updateParticipant(state: Call.Participant.Track.State) async {
+            guard case .some(let call) = self.state.read({ $0 }) else {
+                return assertionFailure("Failed to handle state change, invalid call state")
             }
-            await stopPictureInPicture()
-            removePictureInPictureViewController()
             
-            // Time for the view to be removed from the hierarchy
-            try! await Task.sleep(nanoseconds: 50_000_000)
+            guard let participant = call.participants.first(where: { $0.role == .user }) else {
+                return
+            }
+            
+            let data: [String: Any] = [
+                "id": participant.id,
+                "name": participant.name,
+                "state": participant.state.rawValue,
+                "transceiverSessionId": participant.transceiverSessionId ?? "",
+                "tracks": participant.tracks.map { track in
+                    [
+                        "id": track.id,
+                        "state": track.type == .video ? state.rawValue : track.state.rawValue,
+                        "type": track.type.rawValue
+                    ]
+                }
+            ]
+            
+            let participantUpdate: [String: Any] = [
+                "type": "participantUpdate",
+                "participant": data
+            ]
             
             do {
-                let recorder = RPScreenRecorder.shared()
-                recorder.isMicrophoneEnabled = false
-                recorder.isCameraEnabled = false
-                
-                var isRecording = false
-                
-                let started = { [weak self] in
-                    guard let self = self else { return }
-                    
-                    self.addPictureInPictureViewController()
-                    
-                    // Time for the view to be added to the hierarchy
-                    try! await Task.sleep(nanoseconds: 500_000_000)
-                    
-                    self.startPictureInPicture()
-                    await self.setPictureInPictureTrack()
-                    
-                    guard case .some(let call) = self.state.read({ $0 }) else {
-                        return assertionFailure("Failed to handle state change, invalid call state")
-                    }
-                    
-                    guard let participant = call.participants.first(where: { $0.role == .user }) else {
-                        return
-                    }
-                    
-                    let data: [String: Any] = [
-                        "id": participant.id,
-                        "name": participant.name,
-                        "state": participant.state.rawValue,
-                        "transceiverSessionId": participant.transceiverSessionId ?? "",
-                        "tracks": participant.tracks.map { track in
-                            [
-                                "id": track.id,
-                                "state": track.type == .screenShare ? Call.Participant.Track.State.active.rawValue : track.state.rawValue,
-                                "type": track.type.rawValue
-                            ]
-                        }
-                    ]
-                    
-                    let participantUpdate: [String: Any] = [
-                        "type": "participantUpdate",
-                        "participant": data
-                    ]
-                    
-                    do {
-                        let jsonData = try JSONSerialization.data(withJSONObject: participantUpdate, options: .prettyPrinted)
-                        guard let jsonString = String(data: jsonData, encoding: .utf8) else {
-                            enum UserKitError: Error { case invalidJSON }
-                            throw UserKitError.invalidJSON
-                        }
-                        try await webSocketClient.send(message: .string(jsonString))
-                    } catch {
-                        assertionFailure("Failed to handle state change, JSON invalid \(error)")
-                    }
+                let jsonData = try JSONSerialization.data(withJSONObject: participantUpdate, options: .prettyPrinted)
+                guard let jsonString = String(data: jsonData, encoding: .utf8) else {
+                    enum UserKitError: Error { case invalidJSON }
+                    throw UserKitError.invalidJSON
                 }
-                
-                try await recorder.startCapture { [weak self] sampleBuffer, bufferType, error in
-                    Task {
-                        await self?.webRTCClient.handleScreenShareSourceBuffer(sampleBuffer: sampleBuffer)
-                    }
-                    
-                    if !isRecording {
-                        isRecording = true
-                        Task { await started() }
-                    }
-                }
+                try await webSocketClient.send(message: .string(jsonString))
             } catch {
-                let recordingError = error as NSError
-                switch (recordingError.domain, recordingError.code) {
-                case (RPRecordingErrorDomain, -5801):
-                    guard case .some(let call) = self.state.read({ $0 }) else {
-                        return assertionFailure("Failed to handle state change, invalid call state")
-                    }
-                    
-                    guard let participant = call.participants.first(where: { $0.role == .user }) else {
-                        return
-                    }
-                    
-                    let data: [String: Any] = [
-                        "id": participant.id,
-                        "name": participant.name,
-                        "state": participant.state.rawValue,
-                        "transceiverSessionId": participant.transceiverSessionId ?? "",
-                        "tracks": participant.tracks.map { track in
-                            [
-                                "id": track.id,
-                                "state": track.type == .screenShare ? Call.Participant.Track.State.inactive.rawValue : track.state.rawValue,
-                                "type": track.type.rawValue
-                            ]
-                        }
+                assertionFailure("Failed to handle state change, JSON invalid \(error)")
+            }
+        }
+        
+        guard await cameraClient.requestAccess() else {
+            await updateParticipant(state: .inactive)
+            return
+        }
+        
+        await updateParticipant(state: .active)
+        
+        let stream = await cameraClient.start()
+        for await buffer in stream {
+            await webRTCClient.handleVideoSourceBuffer(sampleBuffer: buffer.sampleBuffer)
+        }
+    }
+    
+    private func requestScreenShare() async {
+        await MainActor.run {
+            pictureInPictureViewController?.delegate = nil
+        }
+        await stopPictureInPicture()
+        removePictureInPictureViewController()
+        
+        // Time for the view to be removed from the hierarchy
+        try! await Task.sleep(nanoseconds: 50_000_000)
+        
+        func updateParticipant(state: Call.Participant.Track.State) async {
+            guard case .some(let call) = self.state.read({ $0 }) else {
+                return assertionFailure("Failed to handle state change, invalid call state")
+            }
+            
+            guard let participant = call.participants.first(where: { $0.role == .user }) else {
+                return
+            }
+            
+            let data: [String: Any] = [
+                "id": participant.id,
+                "name": participant.name,
+                "state": participant.state.rawValue,
+                "transceiverSessionId": participant.transceiverSessionId ?? "",
+                "tracks": participant.tracks.map { track in
+                    [
+                        "id": track.id,
+                        "state": track.type == .screenShare ? state.rawValue : track.state.rawValue,
+                        "type": track.type.rawValue
                     ]
-                    
-                    let participantUpdate: [String: Any] = [
-                        "type": "participantUpdate",
-                        "participant": data
-                    ]
-                    
-                    do {
-                        let jsonData = try JSONSerialization.data(withJSONObject: participantUpdate, options: .prettyPrinted)
-                        guard let jsonString = String(data: jsonData, encoding: .utf8) else {
-                            enum UserKitError: Error { case invalidJSON }
-                            throw UserKitError.invalidJSON
-                        }
-                        try await webSocketClient.send(message: .string(jsonString))
-                    } catch {
-                        assertionFailure("Failed to handle state change, JSON invalid \(error)")
-                    }
-                                        
-                default:
-                    assertionFailure("Failed to handle video request: \(error)")
                 }
+            ]
+            
+            let participantUpdate: [String: Any] = [
+                "type": "participantUpdate",
+                "participant": data
+            ]
+            
+            do {
+                let jsonData = try JSONSerialization.data(withJSONObject: participantUpdate, options: .prettyPrinted)
+                guard let jsonString = String(data: jsonData, encoding: .utf8) else {
+                    enum UserKitError: Error { case invalidJSON }
+                    throw UserKitError.invalidJSON
+                }
+                try await webSocketClient.send(message: .string(jsonString))
+            } catch {
+                assertionFailure("Failed to handle state change, JSON invalid \(error)")
+            }
+        }
+        
+        do {
+            let recorder = RPScreenRecorder.shared()
+            recorder.isMicrophoneEnabled = false
+            recorder.isCameraEnabled = false
+            
+            var isRecording = false
+            
+            let started = { [weak self] in
+                guard let self = self else { return }
+                
+                self.addPictureInPictureViewController()
+                
+                // Time for the view to be added to the hierarchy
+                try! await Task.sleep(nanoseconds: 500_000_000)
+                
+                self.startPictureInPicture()
+                await self.setPictureInPictureTrack()
+                
+                await updateParticipant(state: .active)
+            }
+            
+            try await recorder.startCapture { [weak self] sampleBuffer, bufferType, error in
+                Task {
+                    await self?.webRTCClient.handleScreenShareSourceBuffer(sampleBuffer: sampleBuffer)
+                }
+                
+                if !isRecording {
+                    isRecording = true
+                    Task { await started() }
+                }
+            }
+        } catch {
+            let recordingError = error as NSError
+            switch (recordingError.domain, recordingError.code) {
+            case (RPRecordingErrorDomain, -5801):
+                await updateParticipant(state: .inactive)
+    
+            default:
+                assertionFailure("Failed to handle video request: \(error)")
             }
         }
     }
