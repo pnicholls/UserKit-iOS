@@ -172,7 +172,7 @@ class CallManager {
         } catch {
             assertionFailure("Failed to join call: \(error.localizedDescription)")
         }
-        
+                
         // Pull and push tracks
         await pullTracks()
         await pushTracks()
@@ -258,11 +258,10 @@ class CallManager {
             pictureInPictureViewController.pictureInPictureController.stopPictureInPicture()
         }
         
-        // Wait until Picture-in-Picture is no longer active
         while await MainActor.run(body: { [weak self] in
             self?.pictureInPictureViewController?.pictureInPictureController.isPictureInPictureActive ?? false
         }) {
-            try? await Task.sleep(nanoseconds: 100_000_000) // Wait 0.1 seconds
+            try? await Task.sleep(nanoseconds: 100_000_000)
         }
     }
     
@@ -274,7 +273,7 @@ class CallManager {
         guard case .some(let call) = state.read({ $0 }) else {
             return assertionFailure("Failed to pull tracks, invalid call state")
         }
-                
+                        
         var tracks: [APIClient.PullTracksRequest.Track] = []
         
         let participants = call.participants.filter { $0.role == .host }
@@ -585,18 +584,6 @@ class CallManager {
 }
 
 extension CallManager: PictureInPictureViewControllerDelegate {
-    func pictureInPictureControllerWillStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
-    }
-    
-    func pictureInPictureControllerDidStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
-    }
-
-    func pictureInPictureControllerWillStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
-    }
-    
-    func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
-    }
-        
     func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController) async -> Bool {
         guard case .some(let call) = state.read({ $0 }) else {
             return true
