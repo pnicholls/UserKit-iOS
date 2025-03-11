@@ -81,9 +81,7 @@ class CallManager {
             pictureInPictureViewController?.delegate = self
         }
     }
-    
-    private var videoTrack: RTCVideoTrack?
-        
+            
     // MARK: - Functions
     
     init(apiClient: APIClient, webRTCClient: WebRTCClient, webSocketClient: WebSocket) {
@@ -310,7 +308,8 @@ class CallManager {
             )
             
             guard let sessionDescription = response.sessionDescription, response.requiresImmediateRenegotiation else {
-                return assertionFailure("Failed to pull tracks, response invalid")
+                // TODO: Handle track errors
+                return
             }
             
             try await webRTCClient.setRemoteDescription(.init(sdp: sessionDescription.sdp, type: .offer))
@@ -332,7 +331,7 @@ class CallManager {
     
     private func setPictureInPictureTrack() async {
         let transceivers = await webRTCClient.transceivers()
-        if let videoTrack = transceivers.filter({ $0.direction != .sendOnly }).filter({ $0.mediaType == .video }).compactMap({ $0.receiver.track as? RTCVideoTrack }).first {
+        if let videoTrack = transceivers.filter({ $0.direction != .sendOnly }).filter({ $0.mediaType == .video }).compactMap({ $0.receiver.track as? RTCVideoTrack }).last {
             await pictureInPictureViewController?.set(track: videoTrack)
         }
     }
@@ -413,9 +412,13 @@ class CallManager {
         }
     }
     
-    private func handleStateChange(oldState: Call, newState: Call) async {
+    private func handleStateChange(oldState: Call, newState: Call) async {        
         guard let oldUser = oldState.participants.first(where: { $0.role == .user }), let newUser = newState.participants.first(where: { $0.role == .user }) else {
             return assertionFailure("Failed to handle state change, no user participant")
+        }
+        
+        guard newUser.state == .joined else {
+            return
         }
         
         let oldVideoTrack = oldUser.tracks.first(where: { $0.type == .video })
@@ -430,6 +433,13 @@ class CallManager {
         
         if let newTrack = newScreenShareTrack, newTrack.state == .requested, oldScreenShareTrack?.state != .requested {
             await requestScreenShare()
+        }
+        
+        let oldTracks = oldState.participants.filter { $0.role == .host }.flatMap { $0.tracks }
+        let newTracks = newState.participants.filter { $0.role == .host }.flatMap { $0.tracks }
+        
+        if oldTracks != newTracks {
+            await pullTracks()
         }
     }
     

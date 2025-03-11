@@ -16,7 +16,6 @@ import WebRTC
 
 actor WebRTCClient {
     private var peerConnection: RTCPeerConnection?
-    private var peerConnectionDelegate: PeerConnectionDelegate?
     private var videoSource: RTCVideoSource?
     private var videoCapturer: RTCVideoCapturer?
     private var screenShareSource: RTCVideoSource?
@@ -96,10 +95,6 @@ actor WebRTCClient {
         }
         
         self.peerConnection = peerConnection
-
-        // Not currently used
-//        peerConnectionDelegate = PeerConnectionDelegate()
-//        self.peerConnection?.delegate = peerConnectionDelegate
                 
         addAudioTrack()
         addVideoTrack()
@@ -330,51 +325,5 @@ actor WebRTCClient {
                                       timeStampNs: Int64(timeStampNs))
         
         screenShareSource!.capturer(screenShareCapturer!, didCapture: videoFrame)
-    }
-}
-
-class PeerConnectionDelegate: NSObject, RTCPeerConnectionDelegate {
-    func peerConnection(_ peerConnection: RTCPeerConnection, didChange stateChanged: RTCSignalingState) {
-        print("peerConnection new signaling state: \(stateChanged)")
-    }
-    
-    func peerConnection(_ peerConnection: RTCPeerConnection, didChange newState: RTCPeerConnectionState) {
-        print("peerConnection new peer connection state: \(newState)")
-    }
-    
-    func peerConnection(_ peerConnection: RTCPeerConnection, didAdd stream: RTCMediaStream) {
-        print("peerConnection did add stream")
-    }
-    
-    func peerConnection(_ peerConnection: RTCPeerConnection, didRemove stream: RTCMediaStream) {
-        print("peerConnection did remove stream")
-    }
-    
-    func peerConnectionShouldNegotiate(_ peerConnection: RTCPeerConnection) {
-        print("peerConnection should negotiate")
-    }
-    
-    func peerConnection(_ peerConnection: RTCPeerConnection, didChange newState: RTCIceConnectionState) {
-        print("peerConnection new connection state: \(newState)")
-    }
-    
-    func peerConnection(_ peerConnection: RTCPeerConnection, didChange newState: RTCIceGatheringState) {
-        print("peerConnection new gathering state: \(newState)")
-    }
-    
-    func peerConnection(_ peerConnection: RTCPeerConnection, didGenerate candidate: RTCIceCandidate) {
-        print("didGenerate candidate")
-    }
-    
-    func peerConnection(_ peerConnection: RTCPeerConnection, didRemove candidates: [RTCIceCandidate]) {
-        print("peerConnection did remove candidate(s)")
-    }
-    
-    func peerConnection(_ peerConnection: RTCPeerConnection, didOpen dataChannel: RTCDataChannel) {
-        print("peerConnection did open data channel")
-    }
-    
-    func peerConnection(_ peerConnection: RTCPeerConnection, didStartReceivingOn transceiver: RTCRtpTransceiver) {
-        print("peerConnection didStartReceivingOn ", transceiver.receiver.track?.trackId)
     }
 }
