@@ -11,6 +11,7 @@ import WebRTC
 
 protocol PictureInPictureViewControllerDelegate: AnyObject {
     func pictureInPictureControllerWillStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController)
+    func pictureInPictureControllerDidStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController)
     func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController)
     func pictureInPictureControllerWillStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController)
     func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController) async -> Bool
@@ -73,14 +74,18 @@ extension PictureInPictureViewController: AVPictureInPictureControllerDelegate {
         delegate?.pictureInPictureControllerWillStartPictureInPicture(pictureInPictureController)
     }
     
-    func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
-        delegate?.pictureInPictureControllerDidStopPictureInPicture(pictureInPictureController)
+    func pictureInPictureControllerDidStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
+        delegate?.pictureInPictureControllerDidStartPictureInPicture(pictureInPictureController)
     }
     
     func pictureInPictureControllerWillStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
         delegate?.pictureInPictureControllerWillStopPictureInPicture(pictureInPictureController)
     }
-        
+    
+    func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
+        delegate?.pictureInPictureControllerDidStopPictureInPicture(pictureInPictureController)
+    }
+            
     func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController) async -> Bool {
         guard let delegate = delegate else {
             return true

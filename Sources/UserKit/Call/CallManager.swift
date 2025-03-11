@@ -14,6 +14,7 @@
 
 import AVKit
 import UIKit
+import ReplayKit
 import SwiftUI
 import WebRTC
 
@@ -95,7 +96,6 @@ class CallManager {
             Task {
                 switch (oldState, newState) {
                 case (.none, .some(let call)):
-                    print(call)
                     await self?.addPictureInPictureViewController()
                     
                     let name = call.participants.first(where: { $0.role == .host})?.name
@@ -112,6 +112,8 @@ class CallManager {
                             }
                         }
                     ])
+                case (.some(let oldState), .some(let newState)):
+                    await self?.handleStateChange(oldState: oldState, newState: newState)
                 default:
                     break
                 }
@@ -194,36 +196,74 @@ class CallManager {
         await webRTCClient.close()
     }
     
-    @MainActor private func addPictureInPictureViewController() {
-        guard let viewController = UIViewController.topViewController else {
-            fatalError("Failed to find top view controller")
+    private func addPictureInPictureViewController() {
+        Task { @MainActor in
+            guard let viewController = UIViewController.topViewController else {
+                fatalError("Failed to find top view controller")
+            }
+            
+            guard pictureInPictureViewController == nil else {
+                return
+            }
+        
+            let pictureInPictureViewController = PictureInPictureViewController()
+            self.pictureInPictureViewController = pictureInPictureViewController
+            
+            viewController.addChild(pictureInPictureViewController)
+            viewController.view.addSubview(pictureInPictureViewController.view)
+            pictureInPictureViewController.view.isUserInteractionEnabled = false
+            pictureInPictureViewController.view.isHidden = false
+            pictureInPictureViewController.view.frame = .init(x: viewController.view.frame.width - 50, y: viewController.view.safeAreaInsets.top, width: 50, height: 50)
+            pictureInPictureViewController.didMove(toParent: viewController)
+            
+            viewController.view.layoutIfNeeded()
         }
-        
-        let pictureInPictureViewController = PictureInPictureViewController()
-        self.pictureInPictureViewController = pictureInPictureViewController
-        
-        viewController.addChild(pictureInPictureViewController)
-        viewController.view.addSubview(pictureInPictureViewController.view)
-        pictureInPictureViewController.view.isUserInteractionEnabled = false
-        pictureInPictureViewController.view.isHidden = false
-        pictureInPictureViewController.view.frame = .init(x: viewController.view.frame.width - 50, y: viewController.view.safeAreaInsets.top, width: 50, height: 50)
-        pictureInPictureViewController.didMove(toParent: viewController)
-    }
-        
-    @MainActor private func startPictureInPicture() {
-        guard let pictureInPictureViewController = pictureInPictureViewController else {
-            return
-        }
-
-        pictureInPictureViewController.pictureInPictureController.startPictureInPicture()
     }
     
-    @MainActor private func stopPictureInPicture() {
-        guard let pictureInPictureViewController = pictureInPictureViewController else {
-            return
+    private func removePictureInPictureViewController() {
+        Task { @MainActor in
+            guard let pictureInPictureViewController = pictureInPictureViewController else {
+                return
+            }
+        
+            pictureInPictureViewController.willMove(toParent: nil)
+            pictureInPictureViewController.view.removeFromSuperview()
+            pictureInPictureViewController.removeFromParent()
+            
+            self.pictureInPictureViewController = nil
         }
+    }
+        
+    private func startPictureInPicture() {
+        Task { @MainActor in
+            guard let pictureInPictureViewController = pictureInPictureViewController else {
+                return
+            }
+            
+            guard !pictureInPictureViewController.pictureInPictureController.isPictureInPictureActive else {
+                return
+            }
 
-        pictureInPictureViewController.pictureInPictureController.stopPictureInPicture()
+            pictureInPictureViewController.pictureInPictureController.startPictureInPicture()
+        }
+    }
+    
+    private func stopPictureInPicture() async {
+        await MainActor.run { [weak self] in
+            guard let self = self,
+                  let pictureInPictureViewController = self.pictureInPictureViewController else {
+                return
+            }
+            
+            pictureInPictureViewController.pictureInPictureController.stopPictureInPicture()
+        }
+        
+        // Wait until Picture-in-Picture is no longer active
+        while await MainActor.run(body: { [weak self] in
+            self?.pictureInPictureViewController?.pictureInPictureController.isPictureInPictureActive ?? false
+        }) {
+            try? await Task.sleep(nanoseconds: 100_000_000) // Wait 0.1 seconds
+        }
     }
     
     private func pullTracks() async {
@@ -369,21 +409,116 @@ class CallManager {
             assertionFailure("Failed to push tracks: \(error)")
         }
     }
+    
+    private func handleStateChange(oldState: Call, newState: Call) async {
+        guard let oldUser = oldState.participants.first(where: { $0.role == .user }), let newUser = newState.participants.first(where: { $0.role == .user }) else {
+            return assertionFailure("Failed to handle state change, no user participant")
+        }
+        
+        let oldVideoTrack = oldUser.tracks.first(where: { $0.type == .video })
+        let newVideoTrack = newUser.tracks.first(where: { $0.type == .video })
+        
+        if let newTrack = newVideoTrack, newTrack.state == .requested, oldVideoTrack?.state != .requested {
+            print("video requested")
+        }
+        
+        let oldScreenShareTrack = oldUser.tracks.first(where: { $0.type == .screenShare })
+        let newScreenShareTrack = newUser.tracks.first(where: { $0.type == .screenShare })
+        
+        if let newTrack = newScreenShareTrack, newTrack.state == .requested, oldScreenShareTrack?.state != .requested {
+            await MainActor.run {
+                pictureInPictureViewController?.delegate = nil
+            }
+            await stopPictureInPicture()
+            removePictureInPictureViewController()
+            
+            // Time for the view to be removed from the hierarchy
+            try! await Task.sleep(nanoseconds: 50_000_000)
+            
+            do {
+                let recorder = RPScreenRecorder.shared()
+                recorder.isMicrophoneEnabled = false
+                recorder.isCameraEnabled = false
+                
+                var isRecording = false
+                
+                let started = { [weak self] in
+                    self?.addPictureInPictureViewController()
+                    
+                    // Time for the view to be added to the hierarchy
+                    try! await Task.sleep(nanoseconds: 500_000_000)
+                    
+                    self?.startPictureInPicture()
+                }
+                
+                try await recorder.startCapture { [weak self] sampleBuffer, bufferType, error in
+                    Task {
+                        await self?.webRTCClient.handleScreenShareSourceBuffer(sampleBuffer: sampleBuffer)
+                    }
+                    
+                    if !isRecording {
+                        isRecording = true
+                        Task { await started() }
+                    }
+                }
+            } catch {
+                assertionFailure("Failed to handle video request: \(error)")
+            }
+            
+            guard case .some(let call) = state.read({ $0 }) else {
+                return assertionFailure("Failed to handle state change, invalid call state")
+            }
+            
+            guard let participant = call.participants.first(where: { $0.role == .user }) else {
+                return
+            }
+            
+            let data: [String: Any] = [
+                "id": participant.id,
+                "name": participant.name,
+                "state": participant.state.rawValue,
+                "transceiverSessionId": participant.transceiverSessionId ?? "",
+                "tracks": participant.tracks.map { track in
+                    [
+                        "id": track.id,
+                        "state": track.type == .screenShare ? Call.Participant.Track.State.active.rawValue : track.state.rawValue,
+                        "type": track.type.rawValue
+                    ]
+                }
+            ]
+            
+            let participantUpdate: [String: Any] = [
+                "type": "participantUpdate",
+                "participant": data
+            ]
+            
+            do {
+                let jsonData = try JSONSerialization.data(withJSONObject: participantUpdate, options: .prettyPrinted)
+                guard let jsonString = String(data: jsonData, encoding: .utf8) else {
+                    enum UserKitError: Error { case invalidJSON }
+                    throw UserKitError.invalidJSON
+                }
+                try await webSocketClient.send(message: .string(jsonString))
+            } catch {
+                assertionFailure("Failed to handle state change, JSON invalid \(error)")
+            }
+        }
+    }
 }
 
 extension CallManager: PictureInPictureViewControllerDelegate {
     func pictureInPictureControllerWillStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
     }
     
+    func pictureInPictureControllerDidStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
+    }
+
+    func pictureInPictureControllerWillStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
+    }
+    
     func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
     }
-    
-    func pictureInPictureControllerWillStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
-        Task {
-            await stopPictureInPicture()
-        }
-    }
-    
+        
     func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController) async -> Bool {
         let state = self.state.read { $0 }
         
