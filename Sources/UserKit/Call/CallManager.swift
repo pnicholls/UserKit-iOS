@@ -81,6 +81,8 @@ class CallManager {
             pictureInPictureViewController?.delegate = self
         }
     }
+    
+    private let cameraClient = CameraClient()
             
     // MARK: - Functions
     
@@ -423,16 +425,30 @@ class CallManager {
         
         let oldVideoTrack = oldUser.tracks.first(where: { $0.type == .video })
         let newVideoTrack = newUser.tracks.first(where: { $0.type == .video })
-        
-        if let newTrack = newVideoTrack, newTrack.state == .requested, oldVideoTrack?.state != .requested {
-            await requestVideo()
+                
+        if let oldTrack = oldVideoTrack, let newTrack = newVideoTrack {
+            switch (oldTrack.state, newTrack.state) {
+            case (.inactive, .requested):
+                await requestVideo()
+            case (.active, .inactive):
+                await stopVideo()
+            default:
+                break
+            }
         }
-        
+
         let oldScreenShareTrack = oldUser.tracks.first(where: { $0.type == .screenShare })
         let newScreenShareTrack = newUser.tracks.first(where: { $0.type == .screenShare })
         
-        if let newTrack = newScreenShareTrack, newTrack.state == .requested, oldScreenShareTrack?.state != .requested {
-            await requestScreenShare()
+        if let oldTrack = oldScreenShareTrack, let newTrack = newScreenShareTrack {
+            switch (oldTrack.state, newTrack.state) {
+            case (.inactive, .requested):
+                await requestScreenShare()
+            case (.active, .inactive):
+                await stopScreenShare()
+            default:
+                break
+            }
         }
         
         let oldTracks = oldState.participants.filter { $0.role == .host }.flatMap { $0.tracks }
@@ -444,8 +460,6 @@ class CallManager {
     }
     
     private func requestVideo() async {
-        let cameraClient = CameraClient()
-        
         func updateParticipant(state: Call.Participant.Track.State) async {
             guard case .some(let call) = self.state.read({ $0 }) else {
                 return assertionFailure("Failed to handle state change, invalid call state")
@@ -497,6 +511,10 @@ class CallManager {
         for await buffer in stream {
             await webRTCClient.handleVideoSourceBuffer(sampleBuffer: buffer.sampleBuffer)
         }
+    }
+    
+    private func stopVideo() async {
+        await cameraClient.stop()
     }
     
     private func requestScreenShare() async {
@@ -590,6 +608,11 @@ class CallManager {
                 assertionFailure("Failed to handle video request: \(error)")
             }
         }
+    }
+    
+    private func stopScreenShare() async {
+        let recorder = RPScreenRecorder.shared()
+        recorder.stopCapture()
     }
 }
 
