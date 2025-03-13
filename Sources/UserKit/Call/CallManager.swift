@@ -180,6 +180,13 @@ class CallManager {
     }
     
     private func end() async {
+        await cameraClient.stop()
+        
+        if RPScreenRecorder.shared().isRecording {
+            RPScreenRecorder.shared().stopCapture()
+        }
+        TouchIndicator.enabled = .never
+
         await webRTCClient.close()
     }
     
@@ -464,7 +471,7 @@ class CallManager {
                 await pullTracks()
             }
         case (.some(_), .none):
-            print("call ended")
+            await end()
         case (.none, .none):
             break
         }

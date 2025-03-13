@@ -64,6 +64,10 @@ actor CameraClient {
     }
     
     func stop() async {
+        guard (_captureSession?.isRunning ?? false) else {
+            return
+        }
+        
         await stopCapture()
     }
     
