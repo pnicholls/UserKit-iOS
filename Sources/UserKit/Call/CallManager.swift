@@ -52,7 +52,15 @@ struct Call: Codable, Equatable {
         let tracks: [Track]
         let transceiverSessionId: String?
     }
+    struct TouchIndicator: Codable, Equatable {
+        enum State: String, Codable {
+            case active, inactive
+        }
+        
+        let state: State
+    }
     let participants: [Participant]
+    let touchIndicator: TouchIndicator
 }
 
 class CallManager {
@@ -435,7 +443,7 @@ class CallManager {
             guard newUser.state == .joined else {
                 return
             }
-                        
+            
             let oldVideoTrack = oldUser.tracks.first(where: { $0.type == .video })
             let newVideoTrack = newUser.tracks.first(where: { $0.type == .video })
                     
@@ -462,8 +470,15 @@ class CallManager {
                 default:
                     break
                 }
+                
+                switch (newCall.touchIndicator.state, newTrack.state) {
+                case (.active, .active):
+                    TouchIndicator.enabled = .always
+                default:
+                    TouchIndicator.enabled = .never
+                }
             }
-            
+                        
             let oldTracks = oldCall.participants.filter { $0.role == .host }.flatMap { $0.tracks }
             let newTracks = newCall.participants.filter { $0.role == .host }.flatMap { $0.tracks }
             
@@ -604,8 +619,6 @@ class CallManager {
                 await self.setPictureInPictureTrack()
                 
                 await updateParticipant(state: .active)
-                
-                TouchIndicator.enabled = .always
             }
             
             try await recorder.startCapture { [weak self] sampleBuffer, bufferType, error in
