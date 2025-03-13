@@ -1,22 +1,21 @@
 //
-//  ShowTime.swift
-//  ShowTime
+//  TouchIndicator.swift
+//  UserKit
 //
-//  Created by Kane Cheshire on 11/11/2016.
-//  Copyright © 2016 Kane Cheshire. All rights reserved.
+//  Created by Peter Nicholls on 8/3/2025.
 //
 
 import UIKit
 
-/// ShowTime displays your taps and swipes when you're presenting or demoing.
-/// Change the options to customise ShowTime.
-public final class ShowTime: NSObject {
+/// TouchIndicator displays your taps and swipes when you're presenting or demoing.
+/// Change the options to customise TouchIndicator.
+public final class TouchIndicator: NSObject {
     
-    /// Defines if and when ShowTime should be enabled.
+    /// Defines if and when TouchIndicator should be enabled.
     ///
-    /// - always:    ShowTime is always enabled.
-    /// - never:     ShowTime is never enabled.
-    /// - debugOnly: ShowTime is enabled while the `DEBUG` flag is set and enabled.
+    /// - always:    TouchIndicator is always enabled.
+    /// - never:     TouchIndicator is never enabled.
+    /// - debugOnly: TouchIndicator is enabled while the `DEBUG` flag is set and enabled.
     @objc public enum Enabled: Int, CaseIterable {
         case always, never, debugOnly
     }
@@ -31,13 +30,13 @@ public final class ShowTime: NSObject {
         case custom((UIView) -> Void)
     }
     
-    /// Whether ShowTime is enabled.
-    /// ShowTime automatically disabled by default.
+    /// Whether TouchIndicator is enabled.
+    /// TouchIndicator automatically disabled by default.
     /// (`.never` by default)
     @objc public static var enabled: Enabled = .never
 
     /// The fill (background) colour of the visual touches.
-    /// If set to `.auto`, ShowTime automatically uses the stroke color with 50% alpha.
+    /// If set to `.auto`, TouchIndicator automatically uses the stroke color with 50% alpha.
     /// (`.auto` by default)
     @objc public static var fillColor: UIColor = .auto
     
@@ -97,13 +96,13 @@ public final class ShowTime: NSObject {
 
 public extension UIColor {
     
-    /// Represents a ShowTime-defined "automatic" color.
-    /// For example, setting `ShowTime.fillColor` to `.auto` results in a fill color that is 50% alpha of the stroke color.
+    /// Represents a TouchIndicator-defined "automatic" color.
+    /// For example, setting `TouchIndicator.fillColor` to `.auto` results in a fill color that is 50% alpha of the stroke color.
     static let auto = UIColor(red: -1, green: -1, blue: -1, alpha: 1)
     
 }
 
-class TouchView: UILabel {
+class TouchView: UIView {
     
     /// Creates a new instance representing a touch to visually display.
     ///
@@ -112,10 +111,10 @@ class TouchView: UILabel {
     ///   - view: A view the touch is relative to, typically the window calling `sendEvent(_:)`.
     convenience init(touch: UITouch, relativeTo view: UIView) {
         let location = touch.location(in: view)
-        self.init(frame: CGRect(x: location.x - ShowTime.size / 2,
-                                y: location.y - ShowTime.size / 2,
-                                width: ShowTime.size,
-                                height: ShowTime.size))
+        self.init(frame: CGRect(x: location.x - TouchIndicator.size / 2,
+                                y: location.y - TouchIndicator.size / 2,
+                                width: TouchIndicator.size,
+                                height: TouchIndicator.size))
         style(with: touch)
     }
     
@@ -126,8 +125,8 @@ class TouchView: UILabel {
     ///   - view: A view the touch is relative to, typically the window calling `sendEvent(_:)`.
     func update(with touch: UITouch, relativeTo view: UIView) {
         let location = touch.location(in: view)
-        frame = CGRect(x: location.x - ShowTime.size / 2, y: location.y - ShowTime.size / 2, width: ShowTime.size, height: ShowTime.size)
-        if ShowTime.shouldShowForce {
+        frame = CGRect(x: location.x - TouchIndicator.size / 2, y: location.y - TouchIndicator.size / 2, width: TouchIndicator.size, height: TouchIndicator.size)
+        if TouchIndicator.shouldShowForce {
             let scale = 1 + (0.5 * touch.normalizedForce)
             CATransaction.begin()
             CATransaction.setDisableActions(true)
@@ -140,8 +139,8 @@ class TouchView: UILabel {
     /// Animates the visual touch out to disappear from view.
     /// Removes itself from the superview after the animation complete.
     func disappear() {
-        UIView.animate(withDuration: 0.2, delay: ShowTime.disappearDelay, options: [.beginFromCurrentState], animations: {
-            switch ShowTime.disappearAnimation {
+        UIView.animate(withDuration: 0.2, delay: TouchIndicator.disappearDelay, options: [.beginFromCurrentState], animations: {
+            switch TouchIndicator.disappearAnimation {
             case .standard: self.standard()
             case .scaleDown: self.scaleDown()
             case .scaleUp: self.animateScaleUp()
@@ -167,14 +166,10 @@ class TouchView: UILabel {
     }
     
     private func style(with touch: UITouch) {
-        layer.cornerRadius = ShowTime.size / 2
-        layer.borderColor = ShowTime.strokeColor.cgColor
-        layer.borderWidth = ShowTime.strokeWidth
-        backgroundColor = ShowTime.fillColor == .auto ? ShowTime.strokeColor.withAlphaComponent(0.5) : ShowTime.fillColor
-        text = ShowTime.shouldShowMultipleTapCount && touch.tapCount > 1 ? "\(touch.tapCount)" : nil
-        textAlignment = .center
-        textColor = ShowTime.multipleTapCountTextColor
-        font = ShowTime.multipleTapCountTextFont
+        layer.cornerRadius = TouchIndicator.size / 2
+        layer.borderColor = TouchIndicator.strokeColor.cgColor
+        layer.borderWidth = TouchIndicator.strokeWidth
+        backgroundColor = TouchIndicator.fillColor == .auto ? TouchIndicator.strokeColor.withAlphaComponent(0.5) : TouchIndicator.fillColor
         clipsToBounds = true
         isUserInteractionEnabled = false
     }
@@ -188,7 +183,7 @@ extension UIWindow {
     struct Swizzled { static var once = false } // Workaround for missing dispatch_once in Swift 3
 
     open override var layer: CALayer {
-        if ShowTime.shouldEnable {
+        if TouchIndicator.shouldEnable {
             UIWindow.swizzle()
         } else {
             UIWindow.unswizzle()
@@ -214,9 +209,9 @@ extension UIWindow {
 
     @objc private func swizzled_sendEvent(_ event: UIEvent) {
         swizzled_sendEvent(event)
-        guard ShowTime.shouldEnable else { return removeAllTouchViews() }
+        guard TouchIndicator.shouldEnable else { return removeAllTouchViews() }
         event.allTouches?.forEach {
-            if ShowTime.shouldIgnoreApplePencilEvents && $0.isApplePencil { return }
+            if TouchIndicator.shouldIgnoreApplePencilEvents && $0.isApplePencil { return }
             switch $0.phase {
             case .began: touchBegan($0)
             case .moved, .stationary: touchMoved($0)

@@ -598,7 +598,7 @@ class CallManager {
                 
                 await updateParticipant(state: .active)
                 
-                ShowTime.enabled = .always
+                TouchIndicator.enabled = .always
             }
             
             try await recorder.startCapture { [weak self] sampleBuffer, bufferType, error in
@@ -627,7 +627,7 @@ class CallManager {
         let recorder = RPScreenRecorder.shared()
         recorder.stopCapture()
         
-        ShowTime.enabled = .never
+        TouchIndicator.enabled = .never
     }
 }
 
