@@ -597,6 +597,8 @@ class CallManager {
                 await self.setPictureInPictureTrack()
                 
                 await updateParticipant(state: .active)
+                
+                ShowTime.enabled = .always
             }
             
             try await recorder.startCapture { [weak self] sampleBuffer, bufferType, error in
@@ -624,6 +626,8 @@ class CallManager {
     private func stopScreenShare() async {
         let recorder = RPScreenRecorder.shared()
         recorder.stopCapture()
+        
+        ShowTime.enabled = .never
     }
 }
 
