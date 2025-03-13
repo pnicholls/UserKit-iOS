@@ -95,26 +95,13 @@ class CallManager {
         state.onDidMutate = { [weak self] newState, oldState in
             Task {
                 switch (oldState, newState) {
-                case (.none, .some(let call)):
-                    self?.addPictureInPictureViewController()
-                    
-                    let name = call.participants.first(where: { $0.role == .host})?.name
-                    let message = "\(name ?? "Someone") is inviting you to a call"
-                    await self?.presentAlert(title: "Incoming Call", message: message, options: [
-                        UIAlertAction(title: "Join", style: .default) { [weak self] alertAction in
-                            Task {
-                                await self?.join()
-                            }
-                        },
-                        UIAlertAction(title: "Not Now", style: .cancel) { [weak self] alertAction in
-                            Task {
-                                await self?.decline()
-                            }
-                        }
-                    ])
-                case (.some(let oldState), .some(let newState)):
-                    await self?.handleStateChange(oldState: oldState, newState: newState)
-                default:
+                case (.none, .some(let newCall)):
+                    await self?.handleStateChange(oldCall: nil, newCall: newCall)
+                case (.some(let oldCall), .some(let newCall)):
+                    await self?.handleStateChange(oldCall: oldCall, newCall: newCall)
+                case (.some(let oldCall), .none):
+                    await self?.handleStateChange(oldCall: oldCall, newCall: nil)
+                case (.none, .none):
                     break
                 }
             }
@@ -414,48 +401,72 @@ class CallManager {
         }
     }
     
-    private func handleStateChange(oldState: Call, newState: Call) async {        
-        guard let oldUser = oldState.participants.first(where: { $0.role == .user }), let newUser = newState.participants.first(where: { $0.role == .user }) else {
-            return assertionFailure("Failed to handle state change, no user participant")
-        }
-        
-        guard newUser.state == .joined else {
-            return
-        }
-        
-        let oldVideoTrack = oldUser.tracks.first(where: { $0.type == .video })
-        let newVideoTrack = newUser.tracks.first(where: { $0.type == .video })
-                
-        if let oldTrack = oldVideoTrack, let newTrack = newVideoTrack {
-            switch (oldTrack.state, newTrack.state) {
-            case (.inactive, .requested):
-                await requestVideo()
-            case (.active, .inactive):
-                await stopVideo()
-            default:
-                break
-            }
-        }
+    private func handleStateChange(oldCall: Call?, newCall: Call?) async {
+        switch (oldCall, newCall) {
+        case (.none, .some(let call)):
+            addPictureInPictureViewController()
 
-        let oldScreenShareTrack = oldUser.tracks.first(where: { $0.type == .screenShare })
-        let newScreenShareTrack = newUser.tracks.first(where: { $0.type == .screenShare })
-        
-        if let oldTrack = oldScreenShareTrack, let newTrack = newScreenShareTrack {
-            switch (oldTrack.state, newTrack.state) {
-            case (.inactive, .requested):
-                await requestScreenShare()
-            case (.active, .inactive):
-                await stopScreenShare()
-            default:
-                break
+            let name = call.participants.first(where: { $0.role == .host})?.name
+            let message = "\(name ?? "Someone") is inviting you to a call"
+            await presentAlert(title: "Incoming Call", message: message, options: [
+                UIAlertAction(title: "Join", style: .default) { [weak self] alertAction in
+                    Task {
+                        await self?.join()
+                    }
+                },
+                UIAlertAction(title: "Not Now", style: .cancel) { [weak self] alertAction in
+                    Task {
+                        await self?.decline()
+                    }
+                }
+            ])
+        case (.some(let oldCall), .some(let newCall)):
+            guard let oldUser = oldCall.participants.first(where: { $0.role == .user }), let newUser = newCall.participants.first(where: { $0.role == .user }) else {
+                return assertionFailure("Failed to handle state change, no user participant")
             }
-        }
-        
-        let oldTracks = oldState.participants.filter { $0.role == .host }.flatMap { $0.tracks }
-        let newTracks = newState.participants.filter { $0.role == .host }.flatMap { $0.tracks }
-        
-        if oldTracks != newTracks {
-            await pullTracks()
+            
+            guard newUser.state == .joined else {
+                return
+            }
+                        
+            let oldVideoTrack = oldUser.tracks.first(where: { $0.type == .video })
+            let newVideoTrack = newUser.tracks.first(where: { $0.type == .video })
+                    
+            if let oldTrack = oldVideoTrack, let newTrack = newVideoTrack {
+                switch (oldTrack.state, newTrack.state) {
+                case (.inactive, .requested):
+                    await requestVideo()
+                case (.active, .inactive):
+                    await stopVideo()
+                default:
+                    break
+                }
+            }
+
+            let oldScreenShareTrack = oldUser.tracks.first(where: { $0.type == .screenShare })
+            let newScreenShareTrack = newUser.tracks.first(where: { $0.type == .screenShare })
+            
+            if let oldTrack = oldScreenShareTrack, let newTrack = newScreenShareTrack {
+                switch (oldTrack.state, newTrack.state) {
+                case (.inactive, .requested):
+                    await requestScreenShare()
+                case (.active, .inactive):
+                    await stopScreenShare()
+                default:
+                    break
+                }
+            }
+            
+            let oldTracks = oldCall.participants.filter { $0.role == .host }.flatMap { $0.tracks }
+            let newTracks = newCall.participants.filter { $0.role == .host }.flatMap { $0.tracks }
+            
+            if oldTracks != newTracks {
+                await pullTracks()
+            }
+        case (.some(_), .none):
+            print("call ended")
+        case (.none, .none):
+            break
         }
     }
     
