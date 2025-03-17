@@ -45,7 +45,7 @@ struct Call: Codable, Equatable {
             let type: TrackType
         }
 
-        let id: String
+        let id: String?
         let name: String
         let state: State
         let role: Role
@@ -194,8 +194,20 @@ class CallManager {
             RPScreenRecorder.shared().stopCapture()
         }
         TouchIndicator.enabled = .never
-
+        
         await webRTCClient.close()
+        
+        do {
+            let message: [String: Any] = ["type": "participantLeft"]
+            let jsonData = try JSONSerialization.data(withJSONObject: message, options: .prettyPrinted)
+            guard let json = String(data: jsonData, encoding: .utf8) else {
+                enum UserKitError: Error { case invalidJSON }
+                throw UserKitError.invalidJSON
+            }
+            try await webSocketClient.send(message: .string(json))
+        } catch {
+            assertionFailure("Failed to leave call: \(error.localizedDescription)")
+        }
     }
     
     private func addPictureInPictureViewController() {
@@ -419,22 +431,34 @@ class CallManager {
     private func handleStateChange(oldCall: Call?, newCall: Call?) async {
         switch (oldCall, newCall) {
         case (.none, .some(let call)):
-            addPictureInPictureViewController()
+            guard let user = call.participants.first(where: { $0.role == .user }) else {
+                return assertionFailure("Failed to handle state change, no user participant")
+            }
 
-            let name = call.participants.first(where: { $0.role == .host})?.name
-            let message = "\(name ?? "Someone") is inviting you to a call"
-            await presentAlert(title: "Incoming Call", message: message, options: [
-                UIAlertAction(title: "Join", style: .default) { [weak self] alertAction in
-                    Task {
-                        await self?.join()
+            switch user.state {
+            case .none:
+                addPictureInPictureViewController()
+
+                let name = call.participants.first(where: { $0.role == .host})?.name
+                let message = "\(name ?? "Someone") is inviting you to a call"
+                await presentAlert(title: "Incoming Call", message: message, options: [
+                    UIAlertAction(title: "Join", style: .default) { [weak self] alertAction in
+                        Task {
+                            await self?.join()
+                        }
+                    },
+                    UIAlertAction(title: "Not Now", style: .cancel) { [weak self] alertAction in
+                        Task {
+                            await self?.decline()
+                        }
                     }
-                },
-                UIAlertAction(title: "Not Now", style: .cancel) { [weak self] alertAction in
-                    Task {
-                        await self?.decline()
-                    }
-                }
-            ])
+                ])
+            case .joined:
+                addPictureInPictureViewController()
+                await join()
+            case .declined:
+                print("user declined")
+            }
         case (.some(let oldCall), .some(let newCall)):
             guard let oldUser = oldCall.participants.first(where: { $0.role == .user }), let newUser = newCall.participants.first(where: { $0.role == .user }) else {
                 return assertionFailure("Failed to handle state change, no user participant")
@@ -645,7 +669,9 @@ class CallManager {
     
     private func stopScreenShare() async {
         let recorder = RPScreenRecorder.shared()
-        recorder.stopCapture()
+        if recorder.isRecording {
+            recorder.stopCapture()
+        }
         
         TouchIndicator.enabled = .never
     }

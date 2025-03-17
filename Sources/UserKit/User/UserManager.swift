@@ -94,7 +94,7 @@ class UserManager {
 
         await apiClient.setAccessToken(response.accessToken)
 
-        let socket = try await webSocket.connect(to: response.webSocketUrl)
+        let socket = try await webSocket.connect(to: response.webSocketUrl, accessToken: response.accessToken)
         
         for try await message in socket.messages {
             await handle(message: message)

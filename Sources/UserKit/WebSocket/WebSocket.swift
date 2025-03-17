@@ -59,15 +59,24 @@ actor WebSocket {
         }
     }
     
-    func connect(to url: URL) async throws -> WebSocketStream {
+    func connect(to url: URL, accessToken: String) async throws -> WebSocketStream {
         state = .connecting
-        self.session = URLSession(configuration: .default, delegate: nil, delegateQueue: nil)
+        
+        let config = URLSessionConfiguration.default
+        let headers: [String: String] = [
+            "Authorization": accessToken,
+        ]
+        config.httpAdditionalHeaders = headers
+        
+        self.session = URLSession(configuration: config, delegate: nil, delegateQueue: nil)
         
         socketTask = session?.webSocketTask(with: url, protocols: [])
         guard let task = socketTask else {
             state = .disconnected
             throw ConnectionError()
         }
+        
+        
         
         task.resume()
         state = .connected
