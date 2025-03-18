@@ -431,12 +431,10 @@ class CallManager {
     private func handleStateChange(oldCall: Call?, newCall: Call?) async {
         switch (oldCall, newCall) {
         case (.none, .some(let call)):
-            guard let user = call.participants.first(where: { $0.role == .user }) else {
-                return assertionFailure("Failed to handle state change, no user participant")
-            }
+            let user = call.participants.first(where: { $0.role == .user })
 
-            switch user.state {
-            case .none:
+            switch user?.state {
+            case nil, .some(.none):
                 addPictureInPictureViewController()
 
                 let name = call.participants.first(where: { $0.role == .host})?.name
@@ -456,9 +454,6 @@ class CallManager {
             case .joined:
                 addPictureInPictureViewController()
                 
-                // Rejoin
-                await join()
-
                 let name = call.participants.first(where: { $0.role == .host})?.name
                 let message = "You are in a call with \(name ?? "someone")"
 
@@ -466,7 +461,7 @@ class CallManager {
                     presentAlert(title: "Continue Call", message: message, options: [
                         UIAlertAction(title: "Continue", style: .default) { [weak self] alertAction in
                             self?.startPictureInPicture()
-                            Task { await self?.setPictureInPictureTrack() }
+                            Task { await self?.join() }
                         },
                         UIAlertAction(title: "End", style: .cancel) { [weak self] alertAction in
                             Task {
@@ -479,14 +474,12 @@ class CallManager {
                 print("user declined")
             }
         case (.some(let oldCall), .some(let newCall)):
-            guard let oldUser = oldCall.participants.first(where: { $0.role == .user }), let newUser = newCall.participants.first(where: { $0.role == .user }) else {
-                return assertionFailure("Failed to handle state change, no user participant")
-            }
-            
-            guard newUser.state == .joined else {
+            guard let newUser = newCall.participants.first(where: { $0.role == .user }), newUser.state == .joined else {
                 return
             }
             
+            let oldUser = oldCall.participants.first(where: { $0.role == .user }) ?? .init(id: nil, name: "", state: .none, role: .user, tracks: [], transceiverSessionId: nil)
+                        
             let oldVideoTrack = oldUser.tracks.first(where: { $0.type == .video })
             let newVideoTrack = newUser.tracks.first(where: { $0.type == .video })
                     

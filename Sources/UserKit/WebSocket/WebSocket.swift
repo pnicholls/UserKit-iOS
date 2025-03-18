@@ -76,8 +76,6 @@ actor WebSocket {
             throw ConnectionError()
         }
         
-        
-        
         task.resume()
         state = .connected
         
@@ -85,7 +83,7 @@ actor WebSocket {
             while let self = self, await self.state == .connected, task.state == .running {
                 do {
                     try await self.sendPing()
-                    try await Task.sleep(nanoseconds: 30_000_000_000)
+                    try await Task.sleep(nanoseconds: 5_000_000_000)
                 } catch {
                     assertionFailure("Ping failed: \(error)")
                 }
@@ -108,10 +106,17 @@ actor WebSocket {
             throw SendError()
         }
         
-        let data = try JSONSerialization.data(withJSONObject: ["type": "user-socket-ping"])
-        try await task.send(.string(String(data: data, encoding: .utf8)!))
+        return try await withCheckedThrowingContinuation { continuation in
+            task.sendPing { error in
+                if let error = error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume()
+                }
+            }
+        }
     }
-    
+
     func disconnect() {
         state = .disconnecting
         socketTask?.cancel(with: .normalClosure, reason: nil)
