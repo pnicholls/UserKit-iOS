@@ -19,7 +19,7 @@ class UserManager {
     // MARK: - Types
     
     struct User: Codable {
-        let call: Call
+        let call: Call?
     }
     
     enum State {

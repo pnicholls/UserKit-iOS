@@ -405,7 +405,7 @@ class CallManager {
             }
             
             let data: [String: Any] = [
-                "id": participant.id,
+                "id": participant.id as Any,
                 "name": participant.name,
                 "state": participant.state.rawValue,
                 "transceiverSessionId": sessionId,
@@ -455,7 +455,26 @@ class CallManager {
                 ])
             case .joined:
                 addPictureInPictureViewController()
+                
+                // Rejoin
                 await join()
+
+                let name = call.participants.first(where: { $0.role == .host})?.name
+                let message = "You are in a call with \(name ?? "someone")"
+
+                await MainActor.run {
+                    presentAlert(title: "Continue Call", message: message, options: [
+                        UIAlertAction(title: "Continue", style: .default) { [weak self] alertAction in
+                            self?.startPictureInPicture()
+                            Task { await self?.setPictureInPictureTrack() }
+                        },
+                        UIAlertAction(title: "End", style: .cancel) { [weak self] alertAction in
+                            Task {
+                                await self?.end()
+                            }
+                        }
+                    ])
+                }
             case .declined:
                 print("user declined")
             }
@@ -527,7 +546,7 @@ class CallManager {
             }
             
             let data: [String: Any] = [
-                "id": participant.id,
+                "id": participant.id as Any,
                 "name": participant.name,
                 "state": participant.state.rawValue,
                 "transceiverSessionId": participant.transceiverSessionId ?? "",
@@ -594,7 +613,7 @@ class CallManager {
             }
             
             let data: [String: Any] = [
-                "id": participant.id,
+                "id": participant.id as Any,
                 "name": participant.name,
                 "state": participant.state.rawValue,
                 "transceiverSessionId": participant.transceiverSessionId ?? "",
