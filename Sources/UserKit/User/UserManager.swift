@@ -29,6 +29,10 @@ class UserManager {
     
     // MARK: - Properties
     
+    var isLoggedIn: Bool {
+        storage.get(AppUserCredentials.self) != nil
+    }
+    
     private let apiClient: APIClient
 
     private let callManager: CallManager
@@ -69,8 +73,10 @@ class UserManager {
         
         let credentials = Credentials(apiKey: apiKey, id: id, name: name, email: email)
         storage.save(credentials, forType: AppUserCredentials.self)
-                
-        try await connect()
+                        
+        Task {
+            try await connect()
+        }
     }
     
     func connect() async throws {

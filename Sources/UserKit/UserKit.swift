@@ -13,6 +13,10 @@ public class UserKit {
     
     // MARK: - Properties
     
+    public var isLoggedIn: Bool {
+        return userManager.isLoggedIn
+    }
+    
     private static var userKit: UserKit?
         
     public static var shared: UserKit {
@@ -46,9 +50,9 @@ public class UserKit {
         }
                         
         userKit = .init(apiKey: apiKey)
-        
-        NotificationCenter.default.addObserver(forName: UIScene.didActivateNotification, object: nil, queue: .main) { notification in
-            
+                        
+        if let userKit = userKit, userKit.isLoggedIn {
+            Task { try await userKit.userManager.connect() }
         }
         
         return shared

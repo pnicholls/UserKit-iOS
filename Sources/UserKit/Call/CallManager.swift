@@ -90,6 +90,8 @@ class CallManager {
         }
     }
     
+    private var alertController: UIAlertController? = nil
+    
     private let cameraClient = CameraClient()
             
     // MARK: - Functions
@@ -132,7 +134,9 @@ class CallManager {
             fatalError("Failed to find top view controller")
         }
         
-        let alertController = UIAlertController(title: title, message: message, preferredStyle: .alert)
+        alertController = UIAlertController(title: title, message: message, preferredStyle: .alert)
+        guard let alertController = alertController else { return }
+        
         options.forEach { alertAction in
             alertController.addAction(alertAction)
         }
@@ -522,6 +526,7 @@ class CallManager {
                 await pullTracks()
             }
         case (.some(_), .none):
+            await alertController?.dismiss(animated: true)
             await end()
         case (.none, .none):
             break
