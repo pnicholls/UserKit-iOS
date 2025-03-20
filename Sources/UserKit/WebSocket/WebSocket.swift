@@ -7,7 +7,7 @@
 
 import Foundation
 
-actor WebSocket {
+actor WebSocket: NSObject, URLSessionWebSocketDelegate {
     
     // MARK: - Properties
             
@@ -20,11 +20,11 @@ actor WebSocket {
     private var session: URLSession?
     
     enum ConnectionState {
-            case disconnected
-            case connecting
-            case connected
-            case disconnecting
-        }
+        case disconnected
+        case connecting
+        case connected
+        case disconnecting
+    }
     
     struct ConnectionError: Error {}
     struct SendError: Error {}
@@ -68,7 +68,8 @@ actor WebSocket {
         ]
         config.httpAdditionalHeaders = headers
         
-        self.session = URLSession(configuration: config, delegate: nil, delegateQueue: nil)
+        // Set self as the delegate
+        self.session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
         
         socketTask = session?.webSocketTask(with: url, protocols: [])
         guard let task = socketTask else {
@@ -123,5 +124,23 @@ actor WebSocket {
         socketTask = nil
         session = nil
         state = .disconnected
+    }
+    
+    // MARK: - URLSessionWebSocketDelegate Methods
+    
+    nonisolated func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: (any Error)?) {
+        guard let error = error else {
+            return
+        }
+        
+        let nsError = error as NSError
+        
+        switch (nsError.domain, nsError.code) {
+        case (NSPOSIXErrorDomain, 57):
+            print("disconnected")
+        
+        default:
+            print("Unknown error: \(error.localizedDescription)")
+        }
     }
 }
