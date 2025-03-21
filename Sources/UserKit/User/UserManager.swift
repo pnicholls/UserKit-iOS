@@ -145,14 +145,14 @@ class UserManager {
 extension UserManager: WebSocketConnectionDelegate {
     func webSocketDidConnect(connection: any WebSocketConnection) {
         webSocket.ping(interval: 10)
+        
+        callManager.webSocketDidConnect()
     }
     
     func webSocketDidDisconnect(connection: any WebSocketConnection, closeCode: NWProtocolWebSocket.CloseCode, reason: Data?) {
         switch closeCode {
         case .protocolCode(.goingAway):
             Task {
-                try await Task.sleep(nanoseconds: 3_000_000_000)
-                print("reconnecting")
                 try await connect()
             }
         default:

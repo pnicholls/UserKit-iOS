@@ -129,6 +129,17 @@ class CallManager {
         }
     }
     
+    func webSocketDidConnect() {
+        switch state.read({ $0 }) {
+        case .some(let call) where call.participants.first(where: { $0.role == .user && $0.state == .joined }) != nil:
+            Task {
+                try await updateParticipant(state: .joined)
+            }
+        default:
+            break
+        }
+    }
+    
     @MainActor private func presentAlert(title: String, message: String, options: [UIAlertAction]) {
         guard let viewController = UIViewController.topViewController else {
             fatalError("Failed to find top view controller")
@@ -163,11 +174,9 @@ class CallManager {
             // Set session
             self.sessionId = response.sessionId
             
-            // Update the participants join state
-            let message: [String: Any] = ["type": "participantJoined"]
-            let jsonData = try JSONSerialization.data(withJSONObject: message, options: .prettyPrinted)
-            let json = String(data: jsonData, encoding: .utf8)!
-            webSocketClient.send(string: json)
+            // Update participant
+            try await updateParticipant(state: .joined)
+            
         } catch {
             assertionFailure("Failed to join call: \(error.localizedDescription)")
         }
@@ -175,6 +184,44 @@ class CallManager {
         // Pull and push tracks
         await pullTracks()
         await pushTracks()
+    }
+    
+    private func updateParticipant(state: Call.Participant.State) async throws {
+        guard let sessionId = sessionId else {
+            return
+        }
+        
+        // Fetch the tracks
+        let tracks: [[String: Any]] = await webRTCClient.getLocalTransceivers().compactMap { type, transceiver in
+            guard let id = transceiver.sender.track?.trackId else {
+                return nil
+            }
+            
+            return [
+                "id": "\(sessionId)/\(id)",
+                "type": type,
+                "state": "inactive"
+            ]
+        }
+        
+        // Update the participants join state
+        let data: [String: Any] = [
+            "state": Call.Participant.State.joined.rawValue,
+            "transceiverSessionId": sessionId,
+            "tracks": tracks
+        ]
+        
+        let participantUpdate: [String: Any] = [
+            "type": "participantUpdate",
+            "participant": data
+        ]
+        
+        let jsonData = try JSONSerialization.data(withJSONObject: participantUpdate, options: .prettyPrinted)
+        guard let json = String(data: jsonData, encoding: .utf8) else {
+            enum UserKitError: Error { case invalidJSON }
+            throw UserKitError.invalidJSON
+        }
+        webSocketClient.send(string: json)
     }
     
     private func decline() async {
@@ -397,37 +444,7 @@ class CallManager {
                 return
             }
             
-            let localTracks: [[String: Any]] = await webRTCClient.getLocalTransceivers().compactMap { type, transceiver in
-                guard let id = transceiver.sender.track?.trackId else {
-                    return nil
-                }
-                
-                return [
-                    "id": "\(sessionId)/\(id)",
-                    "type": type,
-                    "state": "inactive"
-                ]
-            }
-            
-            let data: [String: Any] = [
-                "id": participant.id as Any,
-                "name": participant.name,
-                "state": participant.state.rawValue,
-                "transceiverSessionId": sessionId,
-                "tracks": localTracks
-            ]
-            
-            let participantUpdate: [String: Any] = [
-                "type": "participantUpdate",
-                "participant": data
-            ]
-            
-            let jsonData = try JSONSerialization.data(withJSONObject: participantUpdate, options: .prettyPrinted)
-            guard let json = String(data: jsonData, encoding: .utf8) else {
-                enum UserKitError: Error { case invalidJSON }
-                throw UserKitError.invalidJSON
-            }
-            webSocketClient.send(string: json)
+            try await updateParticipant(state: participant.state)
         } catch {
             assertionFailure("Failed to push tracks: \(error)")
         }
