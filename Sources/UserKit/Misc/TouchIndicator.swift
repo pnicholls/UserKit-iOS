@@ -205,6 +205,8 @@ extension UIWindow {
         guard let original = class_getInstanceMethod(self, #selector(UIWindow.sendEvent(_:))) else { return }
         guard let new = class_getInstanceMethod(self, #selector(UIWindow.swizzled_sendEvent(_:))) else { return }
         method_exchangeImplementations(new, original)
+        _touches.values.forEach { $0.removeFromSuperview() }
+        _touches.removeAll()
     }
 
     @objc private func swizzled_sendEvent(_ event: UIEvent) {
