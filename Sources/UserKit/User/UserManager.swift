@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import Network
 
 struct Credentials: Codable {
     let apiKey: String
@@ -15,7 +16,7 @@ struct Credentials: Codable {
 }
 
 class UserManager {
-    
+
     // MARK: - Types
     
     struct User: Codable {
@@ -100,28 +101,20 @@ class UserManager {
 
         await apiClient.setAccessToken(response.accessToken)
 
-        let socket = try await webSocket.connect(to: response.webSocketUrl, accessToken: response.accessToken)
-        
-        for try await message in socket.messages {
-            await handle(message: message)
-        }
+        webSocket.delegate = self
+        webSocket.connect(url: response.webSocketUrl, accessToken: response.accessToken)
     }
     
-    private func handle(message: URLSessionWebSocketTask.Message) async {
+    private func handle(message: String) async {
         do {
-            guard case .string(let messageString) = message,
-                  let data = messageString.data(using: .utf8),
+            guard let data = message.data(using: .utf8),
                   let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let messageType = json["type"] as? String else {
                 assertionFailure("Invalid WebSocket message format")
                 return
             }
-
-            switch messageType {
-            case "user-socket-pong":
-                // NOP
-                break
             
+            switch messageType {
             case "userState":
                 update(state: json)
                 
@@ -147,4 +140,37 @@ class UserManager {
             assertionFailure("Failed to update user state \(error)")
         }
     }
+}
+
+extension UserManager: WebSocketConnectionDelegate {
+    func webSocketDidConnect(connection: any WebSocketConnection) {
+        webSocket.ping(interval: 10)
+    }
+    
+    func webSocketDidDisconnect(connection: any WebSocketConnection, closeCode: NWProtocolWebSocket.CloseCode, reason: Data?) {
+        switch closeCode {
+        case .protocolCode(.goingAway):
+            Task {
+                try await Task.sleep(nanoseconds: 3_000_000_000)
+                print("reconnecting")
+                try await connect()
+            }
+        default:
+            break
+        }
+    }
+    
+    func webSocketViabilityDidChange(connection: any WebSocketConnection, isViable: Bool) {}
+    
+    func webSocketDidAttemptBetterPathMigration(result: Result<any WebSocketConnection, NWError>) {}
+    
+    func webSocketDidReceiveError(connection: any WebSocketConnection, error: NWError) {}
+    
+    func webSocketDidReceivePong(connection: any WebSocketConnection) {}
+    
+    func webSocketDidReceiveMessage(connection: any WebSocketConnection, string: String) {
+        Task { await handle(message: string) }
+    }
+    
+    func webSocketDidReceiveMessage(connection: any WebSocketConnection, data: Data) {}
 }

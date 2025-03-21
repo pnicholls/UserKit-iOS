@@ -167,7 +167,7 @@ class CallManager {
             let message: [String: Any] = ["type": "participantJoined"]
             let jsonData = try JSONSerialization.data(withJSONObject: message, options: .prettyPrinted)
             let json = String(data: jsonData, encoding: .utf8)!
-            try await webSocketClient.send(message: .string(json))
+            webSocketClient.send(string: json)
         } catch {
             assertionFailure("Failed to join call: \(error.localizedDescription)")
         }
@@ -185,13 +185,14 @@ class CallManager {
                 enum UserKitError: Error { case invalidJSON }
                 throw UserKitError.invalidJSON
             }
-            try await webSocketClient.send(message: .string(json))
+            webSocketClient.send(string: json)
         } catch {
             assertionFailure("Failed to decline call: \(error.localizedDescription)")
         }
     }
     
     private func end() async {
+        await stopPictureInPicture()
         await cameraClient.stop()
         
         if RPScreenRecorder.shared().isRecording {
@@ -208,7 +209,7 @@ class CallManager {
                 enum UserKitError: Error { case invalidJSON }
                 throw UserKitError.invalidJSON
             }
-            try await webSocketClient.send(message: .string(json))
+            webSocketClient.send(string: json)
         } catch {
             assertionFailure("Failed to leave call: \(error.localizedDescription)")
         }
@@ -422,11 +423,11 @@ class CallManager {
             ]
             
             let jsonData = try JSONSerialization.data(withJSONObject: participantUpdate, options: .prettyPrinted)
-            guard let jsonString = String(data: jsonData, encoding: .utf8) else {
+            guard let json = String(data: jsonData, encoding: .utf8) else {
                 enum UserKitError: Error { case invalidJSON }
                 throw UserKitError.invalidJSON
             }
-            try await webSocketClient.send(message: .string(jsonString))
+            webSocketClient.send(string: json)
         } catch {
             assertionFailure("Failed to push tracks: \(error)")
         }
@@ -564,11 +565,11 @@ class CallManager {
             
             do {
                 let jsonData = try JSONSerialization.data(withJSONObject: participantUpdate, options: .prettyPrinted)
-                guard let jsonString = String(data: jsonData, encoding: .utf8) else {
+                guard let json = String(data: jsonData, encoding: .utf8) else {
                     enum UserKitError: Error { case invalidJSON }
                     throw UserKitError.invalidJSON
                 }
-                try await webSocketClient.send(message: .string(jsonString))
+                webSocketClient.send(string: json)
             } catch {
                 assertionFailure("Failed to handle state change, JSON invalid \(error)")
             }
@@ -631,11 +632,11 @@ class CallManager {
             
             do {
                 let jsonData = try JSONSerialization.data(withJSONObject: participantUpdate, options: .prettyPrinted)
-                guard let jsonString = String(data: jsonData, encoding: .utf8) else {
+                guard let json = String(data: jsonData, encoding: .utf8) else {
                     enum UserKitError: Error { case invalidJSON }
                     throw UserKitError.invalidJSON
                 }
-                try await webSocketClient.send(message: .string(jsonString))
+                webSocketClient.send(string: json)
             } catch {
                 assertionFailure("Failed to handle state change, JSON invalid \(error)")
             }
