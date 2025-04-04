@@ -7,7 +7,7 @@
 
 import Foundation
 
-//let baseURL = "https://go-core-transmit-owners.trycloudflare.com"
+//let baseURL = "http://localhost:5173"
 let baseURL = "https://getuserkit.com"
 
 actor APIClient {
@@ -57,12 +57,12 @@ actor APIClient {
         
         let (data, _) = try await URLSession.shared.data(for: request)
         
-//        // Print raw JSON response
-//        if let jsonString = String(data: data, encoding: .utf8) {
-//            print("Raw JSON Response: \(jsonString)")
-//        } else {
-//            print("Unable to convert response data to string")
-//        }
+        // Print raw JSON response
+        if let jsonString = String(data: data, encoding: .utf8) {
+            print("Raw JSON Response: \(jsonString)")
+        } else {
+            print("Unable to convert response data to string")
+        }
         
         return data
     }
@@ -82,19 +82,19 @@ actor APIClient {
         var url: String {
             switch self {
             case .postSession:
-                "\(baseURL)/api/calls/sessions/new"
+                "\(baseURL)/api/v1/calls/sessions/new"
                 
             case .postUser:
                 "\(baseURL)/api/v1/users"
                 
             case .pullTracks(let sessionId, _):
-                "\(baseURL)/api/calls/sessions/\(sessionId)/tracks/new"
+                "\(baseURL)/api/v1/calls/sessions/\(sessionId)/tracks/new"
 
             case .pushTracks(let sessionId, _):
-                "\(baseURL)/api/calls/sessions/\(sessionId)/tracks/new"
+                "\(baseURL)/api/v1/calls/sessions/\(sessionId)/tracks/new"
                 
             case .renegotiate(let sessionId, _):
-                "\(baseURL)/api/calls/sessions/\(sessionId)/renegotiate"
+                "\(baseURL)/api/v1/calls/sessions/\(sessionId)/renegotiate"
             }
         }
         

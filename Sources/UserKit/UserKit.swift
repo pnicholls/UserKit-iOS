@@ -52,7 +52,13 @@ public class UserKit {
         userKit = .init(apiKey: apiKey)
                         
         if let userKit = userKit, userKit.isLoggedIn {
-            Task { try await userKit.userManager.connect() }
+            Task {
+                do {
+                    try await userKit.userManager.connect()
+                } catch {
+                    print("Failed to connect to UserKit: \(error)")
+                }
+            }
         }
         
         return shared
