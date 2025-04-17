@@ -7,7 +7,7 @@
 
 import Foundation
 
-let baseURL = "https://screw-give-gl-rugby.trycloudflare.com"
+let baseURL = "https://resistance-statements-visitor-command.trycloudflare.com"
 //let baseURL = "https://getuserkit.com"
 
 actor APIClient {
