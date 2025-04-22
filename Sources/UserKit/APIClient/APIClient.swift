@@ -7,8 +7,8 @@
 
 import Foundation
 
-let baseURL = "https://resistance-statements-visitor-command.trycloudflare.com"
-//let baseURL = "https://getuserkit.com"
+//let baseURL = "https://resistance-statements-visitor-command.trycloudflare.com"
+let baseURL = "https://getuserkit.com"
 
 actor APIClient {
     private var accessToken: String?
