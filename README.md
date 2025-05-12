@@ -38,10 +38,11 @@ try await UserKit.shared.login(id: "2", name: "Tom Nicholls", email: "tom@nichol
 
 That's all that is required! 
 
-Now you can jump over to getuserkit.com find your logged in user and start a call with them.
+Now you can jump over to [getuserkit.com](https://getuserkit.com), find your logged in user and start making talking to your users, literally. 
 
 ## 🎉 Screenshots
 
+### What your users see
 <div align="center">
   <img src="https://github.com/user-attachments/assets/dd89b43d-cfb8-4eb2-8c3f-0472d1e030bf" alt="Mobile PiP" width="300" style="margin: 0 10px;" /> 
 </div> 
