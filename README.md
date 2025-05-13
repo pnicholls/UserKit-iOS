@@ -6,6 +6,10 @@ UserKit is the easiest way to add real-time video support to your iOS app.
 
 Designed for support, onboarding, or dev use cases, UserKit enables your team to connect with end-users via video & screensharing — without leaving your app.
 
+## 🎉 Quick Demo
+
+https://github.com/user-attachments/assets/7acc2987-ebe7-4f90-b47b-c4ef291b0216
+
 ## ✨ Features
 
 - 🔄 Picture-in-Picture video calls
@@ -39,22 +43,4 @@ try await UserKit.shared.login(id: "2", name: "Tom Nicholls", email: "tom@nichol
 That's all that is required! 
 
 Now you can jump over to [getuserkit.com](https://getuserkit.com), find your logged in user and start making talking to your users, literally. 
-
-## 🎉 Screenshots
-
-### What your users see
-<div align="center">
-  <img src="https://github.com/user-attachments/assets/dd89b43d-cfb8-4eb2-8c3f-0472d1e030bf" alt="Mobile PiP" width="300" style="margin: 0 10px;" /> 
-</div> 
-
-### View all your user info
-<div align="center" style="margin-top: 20px;">
-  <img src="https://github.com/user-attachments/assets/0e4361ce-754b-4f55-967f-571c6bab4f29" alt="Web dashboard call UI" width="700" style="margin: 10px 0;" />
-</div> 
-
-### A call with a user
-<div align="center">
-  <img src="https://github.com/user-attachments/assets/88b9e3dc-4135-4fb2-83ea-6a64ae7c1baa" alt="UserKit screen sharing" width="700" style="margin: 10px 0;" />
-</div>
-
 
