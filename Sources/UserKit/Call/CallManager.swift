@@ -46,7 +46,8 @@ struct Call: Codable, Equatable {
         }
 
         let id: String?
-        let name: String
+        let firstName: String?
+        let lastName: String?
         let state: State
         let role: Role
         let tracks: [Track]
@@ -459,7 +460,7 @@ class CallManager {
             case nil, .some(.none):
                 addPictureInPictureViewController()
 
-                let name = call.participants.first(where: { $0.role == .host})?.name
+                let name = call.participants.first(where: { $0.role == .host})?.firstName
                 let message = "\(name ?? "Someone") is inviting you to a call"
                 await presentAlert(title: "Incoming Call", message: message, options: [
                     UIAlertAction(title: "Join", style: .default) { [weak self] alertAction in
@@ -476,7 +477,7 @@ class CallManager {
             case .joined:
                 addPictureInPictureViewController()
                 
-                let name = call.participants.first(where: { $0.role == .host})?.name
+                let name = call.participants.first(where: { $0.role == .host})?.firstName
                 let message = "You are in a call with \(name ?? "someone")"
 
                 await MainActor.run {
@@ -500,7 +501,7 @@ class CallManager {
                 return
             }
             
-            let oldUser = oldCall.participants.first(where: { $0.role == .user }) ?? .init(id: nil, name: "", state: .none, role: .user, tracks: [], transceiverSessionId: nil)
+            let oldUser = oldCall.participants.first(where: { $0.role == .user }) ?? .init(id: nil, firstName: nil, lastName: nil, state: .none, role: .user, tracks: [], transceiverSessionId: nil)
                         
             let oldVideoTrack = oldUser.tracks.first(where: { $0.type == .video })
             let newVideoTrack = newUser.tracks.first(where: { $0.type == .video })
@@ -563,7 +564,8 @@ class CallManager {
             
             let data: [String: Any] = [
                 "id": participant.id as Any,
-                "name": participant.name,
+                "firstName": participant.firstName as Any,
+                "lastName": participant.lastName as Any,
                 "state": participant.state.rawValue,
                 "transceiverSessionId": participant.transceiverSessionId ?? "",
                 "tracks": participant.tracks.map { track in
@@ -630,7 +632,8 @@ class CallManager {
             
             let data: [String: Any] = [
                 "id": participant.id as Any,
-                "name": participant.name,
+                "firstName": participant.firstName as Any,
+                "lastName": participant.lastName as Any,
                 "state": participant.state.rawValue,
                 "transceiverSessionId": participant.transceiverSessionId ?? "",
                 "tracks": participant.tracks.map { track in
@@ -718,7 +721,7 @@ extension CallManager: PictureInPictureViewControllerDelegate {
             return true
         }
 
-        let name = call.participants.first(where: { $0.role == .host})?.name
+        let name = call.participants.first(where: { $0.role == .host})?.firstName
         let message = "You are in a call with \(name ?? "someone")"
 
         await MainActor.run {
