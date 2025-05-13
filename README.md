@@ -42,5 +42,5 @@ try await UserKit.shared.login(id: "2", name: "Tom Nicholls", email: "tom@nichol
 
 That's all that is required! 
 
-Now you can jump over to [getuserkit.com](https://getuserkit.com), find your logged in user and start making talking to your users, literally. 
+Now you can jump over to [getuserkit.com](https://getuserkit.com), find your logged in user and start talking to your users. 
 
