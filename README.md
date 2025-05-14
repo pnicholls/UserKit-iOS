@@ -1,5 +1,7 @@
 # UserKit
 
+(Please note, this is very much alpha-level software and has not been publicly released)
+
 Everything you need to talk to your users in just a few lines of code.
 
 UserKit is the easiest way to add real-time video support to your iOS app. 
