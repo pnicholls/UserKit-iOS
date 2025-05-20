@@ -74,10 +74,8 @@ class UserManager {
         
         let credentials = Credentials(apiKey: apiKey, id: id, name: name, email: email)
         storage.save(credentials, forType: AppUserCredentials.self)
-                        
-        Task {
-            try await connect()
-        }
+
+        try await connect()
     }
     
     func connect() async throws {

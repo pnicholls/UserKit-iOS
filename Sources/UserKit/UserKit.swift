@@ -11,6 +11,12 @@ import SwiftUI
 
 public class UserKit {
     
+    // MARK: - Types
+    
+    public enum Availability {
+        case active, inactive
+    }
+    
     // MARK: - Properties
     
     public var isLoggedIn: Bool {
@@ -30,6 +36,8 @@ public class UserKit {
     private let apiKey: String
     
     private let apiClient: APIClient
+    
+    private let availabilityManager: AvailabilityManager
     
     private let callManager: CallManager
     
@@ -68,6 +76,7 @@ public class UserKit {
         self.apiKey = apiKey
         self.apiClient = APIClient()
         self.storage = Storage()
+        self.availabilityManager = AvailabilityManager(apiClient: apiClient, storage: storage)
         self.webRTCClient = WebRTCClient()
         self.webSocket = WebSocket()
         self.callManager = CallManager(apiClient: apiClient, webRTCClient: webRTCClient, webSocketClient: webSocket)
@@ -76,7 +85,11 @@ public class UserKit {
     
     public func login(id: String?, name: String?, email: String?) async throws {
         try await userManager.login(apiKey: apiKey, id: id, name: name, email: email)
-    }    
+    }
+        
+    public func availability() async throws -> Availability {
+        try await availabilityManager.availability()
+    }
 }
 
 struct RootView: View {

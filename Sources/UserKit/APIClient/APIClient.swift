@@ -73,6 +73,7 @@ actor APIClient {
             case get, post, put, delete
         }
         
+        case availability
         case postUser(UserRequest)
         case postSession(PostSessionRequest)
         case pullTracks(String, PullTracksRequest)
@@ -81,6 +82,9 @@ actor APIClient {
                 
         var url: String {
             switch self {
+            case .availability:
+                "\(baseURL)/api/v1/availability"
+                
             case .postSession:
                 "\(baseURL)/api/v1/calls/sessions/new"
                 
@@ -100,6 +104,8 @@ actor APIClient {
         
         var method: Method {
             switch self {
+            case .availability:
+                return .get
             case .postSession, .postUser, .pullTracks, .pushTracks:
                 return .post
             case .renegotiate:
@@ -109,6 +115,8 @@ actor APIClient {
         
         var body: Encodable? {
             switch self {
+            case .availability:
+                return nil
             case .postSession:
                 return nil
             case .postUser(let request):
@@ -136,6 +144,11 @@ actor APIClient {
     enum APIError: Error {
         case invalidURL
         case missingAPIKey
+    }
+    
+    struct AvailabilityResponse: Codable, Equatable {
+        let available: Bool
+        let reason: String?
     }
     
     // Request/Response Models
