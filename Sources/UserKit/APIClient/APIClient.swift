@@ -7,11 +7,22 @@
 
 import Foundation
 
-//let baseURL = "https://resistance-statements-visitor-command.trycloudflare.com"
+//let baseURL = "http://localhost:3000"
 let baseURL = "https://getuserkit.com"
 
 actor APIClient {
+    
+    // MARK: - Properties
+    
+    private let device: Device
+    
     private var accessToken: String?
+    
+    // MARK: - Functions
+    
+    init(device: Device) {
+        self.device = device
+    }
     
     func setAccessToken(_ token: String) {
         self.accessToken = token
@@ -42,8 +53,40 @@ actor APIClient {
         }
         
         var request = URLRequest(url: url)
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        
+        let headers = [
+            "Authorization": "Bearer \(token)",
+            "Content-Type": "application/json",
+            "X-Platform": "iOS",
+            "X-Platform-Environment": "SDK",
+            "X-Vendor-ID": device.vendorId,
+            "X-App-Version": device.appVersion,
+            "X-App-Build": device.buildVersionNumber,
+            "X-OS-Version": device.osVersion,
+            "X-Device-Model": device.model,
+            "X-Device-Locale": device.locale,
+            "X-Device-Region": device.regionCode,
+            "X-Device-Language-Code": device.languageCode,
+            "X-Device-Currency-Code": device.currencyCode,
+            "X-Device-Currency-Symbol": device.currencySymbol,
+            "X-Device-Timezone-Offset": device.secondsFromGMT,
+            "X-App-Install-Date": device.appInstalledAtString,
+            "X-Radio-Type": device.radioType,
+            "X-Device-Interface-Style": device.interfaceStyle,
+            "X-SDK-Version": sdkVersion,
+            "X-Bundle-ID": device.bundleId,
+            "X-Low-Power-Mode": device.isLowPowerModeEnabled,
+            "X-Is-Sandbox": device.isSandbox,
+            "X-Current-Time": Date().isoString,
+        ]
+        
+        for header in headers {
+          request.setValue(
+            header.value,
+            forHTTPHeaderField: header.key
+          )
+        }
+        
         request.httpMethod = route.method.rawValue
         
         let encoder = route.encoder

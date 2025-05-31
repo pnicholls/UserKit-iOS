@@ -9,6 +9,10 @@ import Foundation
 import UIKit
 import SwiftUI
 
+let sdkVersion = """
+0.1.0
+"""
+
 public class UserKit {
     
     // MARK: - Types
@@ -40,6 +44,8 @@ public class UserKit {
     private let availabilityManager: AvailabilityManager
     
     private let callManager: CallManager
+    
+    private let device: Device
     
     private let storage: Storage
     
@@ -74,7 +80,8 @@ public class UserKit {
         
     init(apiKey: String) {
         self.apiKey = apiKey
-        self.apiClient = APIClient()
+        self.device = Device()
+        self.apiClient = APIClient(device: device)
         self.storage = Storage()
         self.availabilityManager = AvailabilityManager(apiClient: apiClient, storage: storage)
         self.webRTCClient = WebRTCClient()
@@ -89,6 +96,12 @@ public class UserKit {
         
     public func availability() async throws -> Availability {
         try await availabilityManager.availability()
+    }
+    
+    public func call() {
+        Task {
+            await callManager.call()
+        }
     }
 }
 

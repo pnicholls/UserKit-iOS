@@ -82,7 +82,16 @@ class PictureInPictureVideoCallViewController: AVPictureInPictureVideoCallViewCo
     lazy var videoView: RTCMTLVideoView = {
         let videoView = RTCMTLVideoView()
         videoView.translatesAutoresizingMaskIntoConstraints = false
+        videoView.transform = CGAffineTransform(scaleX: -1, y: 1)
         return videoView
+    }()
+    
+    private lazy var activityIndicator: UIActivityIndicatorView = {
+        let indicator = UIActivityIndicatorView(style: .medium)
+        indicator.translatesAutoresizingMaskIntoConstraints = false
+        indicator.startAnimating()
+        indicator.color = .white
+        return indicator
     }()
         
     // MARK: - Functions
@@ -90,13 +99,17 @@ class PictureInPictureVideoCallViewController: AVPictureInPictureVideoCallViewCo
     override func viewDidLoad() {
         super.viewDidLoad()
 
+        view.addSubview(activityIndicator)
         view.addSubview(videoView)
         
         NSLayoutConstraint.activate([
             videoView.topAnchor.constraint(equalTo: view.topAnchor),
             videoView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             videoView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            videoView.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+            videoView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            
+            activityIndicator.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            activityIndicator.centerYAnchor.constraint(equalTo: view.centerYAnchor)
         ])
     }
 }

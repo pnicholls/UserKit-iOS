@@ -52,6 +52,31 @@ struct Call: Codable, Equatable {
         let role: Role
         let tracks: [Track]
         let transceiverSessionId: String?
+        
+        private enum CodingKeys: String, CodingKey {
+            case id, firstName, lastName, state, role, tracks, transceiverSessionId
+        }
+        
+        init(id: String? = nil, firstName: String? = nil, lastName: String? = nil, state: State, role: Role, tracks: [Track] = [], transceiverSessionId: String? = nil) {
+            self.id = id
+            self.firstName = firstName
+            self.lastName = lastName
+            self.state = state
+            self.role = role
+            self.tracks = tracks
+            self.transceiverSessionId = transceiverSessionId
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = try container.decodeIfPresent(String.self, forKey: .id)
+            firstName = try container.decodeIfPresent(String.self, forKey: .firstName)
+            lastName = try container.decodeIfPresent(String.self, forKey: .lastName)
+            state = try container.decode(State.self, forKey: .state)
+            role = try container.decode(Role.self, forKey: .role)
+            tracks = try container.decodeIfPresent([Track].self, forKey: .tracks) ?? []
+            transceiverSessionId = try container.decodeIfPresent(String.self, forKey: .transceiverSessionId)
+        }
     }
     struct TouchIndicator: Codable, Equatable {
         enum State: String, Codable {
@@ -119,6 +144,41 @@ class CallManager {
         }
     }
     
+    func call() async {
+        addPictureInPictureViewController()
+        
+        // Time for the view to be ready
+        try! await Task.sleep(nanoseconds: 50_000_000)
+        
+        do {
+            // Init the call
+            let message: [String: Any] = ["type": "call.participant.initiate"]
+            try post(message: message)
+            
+            // Create a session
+            async let apiTask = apiClient.request(
+                endpoint: .postSession(.init()),
+                as: APIClient.PostSessionResponse.self
+            )
+            
+            // Configure WebRTC
+            async let webRTCTask = webRTCClient.configure()
+        
+            // Start Picture in Picture with loading state
+            async let pictureInPictureTask: () = startPictureInPicture()
+            
+            let (response, _, _) = try await (apiTask, webRTCTask, pictureInPictureTask)
+            
+            // Set session
+            self.sessionId = response.sessionId
+                        
+        } catch {
+            assertionFailure("Failed to join call: \(error.localizedDescription)")
+        }
+                
+        await pushTracks()
+    }
+    
     func update(state: Call?) {
         self.state.mutate {
             switch state {
@@ -133,9 +193,11 @@ class CallManager {
     func webSocketDidConnect() {
         switch state.read({ $0 }) {
         case .some(let call) where call.participants.first(where: { $0.role == .user && $0.state == .joined }) != nil:
-            Task {
-                try await updateParticipant(state: .joined)
-            }
+            break
+            // What did this do?
+//            Task {
+//                try await updateParticipant(state: .joined)
+//            }
         default:
             break
         }
@@ -176,7 +238,11 @@ class CallManager {
             self.sessionId = response.sessionId
             
             // Update participant
-            try await updateParticipant(state: .joined)
+            let message: [String: Any] = [
+                "type": "call.participant.update",
+                "data": ["state": "joined"]
+            ]
+            try post(message: message)
             
         } catch {
             assertionFailure("Failed to join call: \(error.localizedDescription)")
@@ -187,7 +253,7 @@ class CallManager {
         await pushTracks()
     }
     
-    private func updateParticipant(state: Call.Participant.State) async throws {
+    private func updateParticipantTracks() async throws {
         guard let sessionId = sessionId else {
             return
         }
@@ -207,23 +273,69 @@ class CallManager {
         
         // Update the participants join state
         let data: [String: Any] = [
-            "state": Call.Participant.State.joined.rawValue,
             "transceiverSessionId": sessionId,
             "tracks": tracks
         ]
         
-        let participantUpdate: [String: Any] = [
-            "type": "participantUpdate",
-            "participant": data
+        let object: [String: Any] = [
+            "type": "call.participant.tracks.update",
+            "data": data
         ]
         
-        let jsonData = try JSONSerialization.data(withJSONObject: participantUpdate, options: .prettyPrinted)
+        let jsonData = try JSONSerialization.data(withJSONObject: object, options: .prettyPrinted)
         guard let json = String(data: jsonData, encoding: .utf8) else {
             enum UserKitError: Error { case invalidJSON }
             throw UserKitError.invalidJSON
         }
         webSocketClient.send(string: json)
     }
+    
+    private func post(message: [String: Any]) throws {
+        let jsonData = try JSONSerialization.data(withJSONObject: message, options: .prettyPrinted)
+        guard let json = String(data: jsonData, encoding: .utf8) else {
+            enum UserKitError: Error { case invalidJSON }
+            throw UserKitError.invalidJSON
+        }
+        webSocketClient.send(string: json)
+    }
+    
+//    private func updateParticipant(state: Call.Participant.State) async throws {
+//        guard let sessionId = sessionId else {
+//            return
+//        }
+//        
+//        // Fetch the tracks
+//        let tracks: [[String: Any]] = await webRTCClient.getLocalTransceivers().compactMap { type, transceiver in
+//            guard let id = transceiver.sender.track?.trackId else {
+//                return nil
+//            }
+//            
+//            return [
+//                "id": "\(sessionId)/\(id)",
+//                "type": type,
+//                "state": "inactive"
+//            ]
+//        }
+//        
+//        // Update the participants join state
+//        let data: [String: Any] = [
+//            "state": Call.Participant.State.joined.rawValue,
+//            "transceiverSessionId": sessionId,
+//            "tracks": tracks
+//        ]
+//        
+//        let participantUpdate: [String: Any] = [
+//            "type": "participantUpdate",
+//            "participant": data
+//        ]
+//        
+//        let jsonData = try JSONSerialization.data(withJSONObject: participantUpdate, options: .prettyPrinted)
+//        guard let json = String(data: jsonData, encoding: .utf8) else {
+//            enum UserKitError: Error { case invalidJSON }
+//            throw UserKitError.invalidJSON
+//        }
+//        webSocketClient.send(string: json)
+//    }
     
     private func decline() async {
         do {
@@ -303,6 +415,8 @@ class CallManager {
         
     private func startPictureInPicture() {
         Task { @MainActor in
+            await Task.yield() // yield to the run loop
+
             guard let pictureInPictureViewController = pictureInPictureViewController else {
                 return
             }
@@ -338,7 +452,7 @@ class CallManager {
         }
         
         guard case .some(let call) = state.read({ $0 }) else {
-            return assertionFailure("Failed to pull tracks, invalid call state")
+            return
         }
                         
         var tracks: [APIClient.PullTracksRequest.Track] = []
@@ -411,7 +525,7 @@ class CallManager {
         }
         
         guard case .some(let call) = state.read({ $0 }) else {
-            return assertionFailure("Failed to pull tracks, invalid call state")
+            return
         }
 
         do {
@@ -441,11 +555,7 @@ class CallManager {
             
             try await webRTCClient.setRemoteDescription(.init(sdp: response.sessionDescription.sdp, type: .answer))
             
-            guard let participant = call.participants.first(where: { $0.role == .user }) else {
-                return
-            }
-            
-            try await updateParticipant(state: participant.state)
+            try await updateParticipantTracks()
         } catch {
             assertionFailure("Failed to push tracks: \(error)")
         }
@@ -458,6 +568,7 @@ class CallManager {
 
             switch user?.state {
             case nil, .some(.none):
+                break // TODO - Handle this better, an outgoing call inits a call object
                 addPictureInPictureViewController()
 
                 let name = call.participants.first(where: { $0.role == .host})?.firstName
@@ -475,6 +586,7 @@ class CallManager {
                     }
                 ])
             case .joined:
+                break // TODO - Handle this better, an outgoing call inits a call object
                 addPictureInPictureViewController()
                 
                 let name = call.participants.first(where: { $0.role == .host})?.firstName
@@ -501,7 +613,7 @@ class CallManager {
                 return
             }
             
-            let oldUser = oldCall.participants.first(where: { $0.role == .user }) ?? .init(id: nil, firstName: nil, lastName: nil, state: .none, role: .user, tracks: [], transceiverSessionId: nil)
+            let oldUser = oldCall.participants.first(where: { $0.role == .user }) ?? .init(state: .none, role: .user)
                         
             let oldVideoTrack = oldUser.tracks.first(where: { $0.type == .video })
             let newVideoTrack = newUser.tracks.first(where: { $0.type == .video })
